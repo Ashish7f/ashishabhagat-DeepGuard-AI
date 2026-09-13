@@ -32,6 +32,10 @@ frontend/dist/
 *.png
 *.jpg
 
+# Allow sample demo images in frontend public
+!frontend/public/samples/*
+!frontend/public/samples/**
+
 # Test images
 test.jpg
 test1.jpg
