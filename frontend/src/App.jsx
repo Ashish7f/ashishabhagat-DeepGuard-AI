@@ -57,7 +57,7 @@ function App() {
     const formData = new FormData();
     formData.append("file", file);
 
-    const apiBaseUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+    const apiBaseUrl = import.meta.env.VITE_API_URL || "https://ashishabhagat-deepguard-ai.onrender.com";
 
     try {
       const response = await fetch(`${apiBaseUrl}/predict`, {
