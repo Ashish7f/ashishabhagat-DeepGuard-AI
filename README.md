@@ -12,6 +12,8 @@ DeepGuard AI is a state-of-the-art deepfake detection system powered by a fine-t
 
 ## 🌐 Live Deployment
 
+- **Public Web Application:** [https://deep-fake-detector-ai.vercel.app](https://deep-fake-detector-ai.vercel.app)
+- **Alternative Mirror:** [https://deepfake-detector-v8.vercel.app](https://deepfake-detector-v8.vercel.app)
 - **Backend API:** [`https://ashishabhagat-deepguard-ai.onrender.com`](https://ashishabhagat-deepguard-ai.onrender.com)
 - **Health Check:** [`https://ashishabhagat-deepguard-ai.onrender.com/`](https://ashishabhagat-deepguard-ai.onrender.com/)
 - **Inference Endpoint:** [`https://ashishabhagat-deepguard-ai.onrender.com/predict`](https://ashishabhagat-deepguard-ai.onrender.com/predict)
