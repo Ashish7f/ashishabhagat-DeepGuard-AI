@@ -1,0 +1,38 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Datasets
+dataset/
+dataset_old/
+external_test/
+external_normalized/
+external_color_normalized/
+external_cropped/
+celebdf_v2_eval/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Environment / logs
+.env
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Model checkpoints (hosted via GitHub Releases)
+*.pth
+
+# Generated analysis files
+*.csv
+*.png
+*.jpg
+
+# Test images
+test.jpg
+test1.jpg
+test2.jpg
