@@ -2,7 +2,7 @@ import os
 import sys
 from pathlib import Path
 
-# Ensure root and backend are in path
+# Ensure root and backend are in sys.path
 ROOT_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = ROOT_DIR / "backend"
 
@@ -14,5 +14,9 @@ from backend.app import app
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("app:app", host="0.0.0.0", port=port)
+    raw_port = os.environ.get("PORT", "10000")
+    try:
+        port = int(raw_port)
+    except (ValueError, TypeError):
+        port = 10000
+    uvicorn.run(app, host="0.0.0.0", port=port)
