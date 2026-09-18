@@ -1,4 +1,6 @@
 import io
+import time
+import urllib.request
 from pathlib import Path
 
 import torch
@@ -426,19 +428,13 @@ def predict_tensor_tta(crop_image: Image.Image):
 # IMAGE PREDICTION WITH MULTI-SUBJECT & SCENERY INSPECTION
 # ============================================================
 
-@app.post("/predict")
-async def predict(file: UploadFile = File(...), db: Session = Depends(get_db)):
-
+def analyze_image_pil(
+    image: Image.Image,
+    filename: str,
+    file_size_bytes: Optional[int],
+    db: Session
+):
     start_time = time.perf_counter()
-
-    try:
-        contents = await file.read()
-        image = Image.open(io.BytesIO(contents)).convert("RGB")
-    except Exception:
-        raise HTTPException(
-            status_code=400,
-            detail="The uploaded file could not be decoded as an image. Please provide a valid JPG, PNG, or WEBP photo."
-        )
 
     # 1. Detect all faces in the image
     detected_faces = extract_detected_faces(image)
@@ -520,8 +516,8 @@ async def predict(file: UploadFile = File(...), db: Session = Depends(get_db)):
     created_at_iso = None
     try:
         record = ScanRecord(
-            filename=file.filename if file.filename else "uploaded_image",
-            file_size_bytes=len(contents) if contents else None,
+            filename=filename if filename else "uploaded_image",
+            file_size_bytes=file_size_bytes,
             prediction=prediction,
             confidence=confidence,
             fake_probability=fake_probability,
@@ -545,7 +541,7 @@ async def predict(file: UploadFile = File(...), db: Session = Depends(get_db)):
     return {
         "scan_id": scan_id,
         "created_at": created_at_iso,
-        "filename": file.filename,
+        "filename": filename,
         "prediction": prediction,
         "confidence": confidence,
         "fake_probability": fake_probability,
@@ -560,6 +556,68 @@ async def predict(file: UploadFile = File(...), db: Session = Depends(get_db)):
         "forensics": forensics,
         "latency_ms": latency_ms
     }
+
+
+@app.post("/predict")
+async def predict(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    try:
+        contents = await file.read()
+        image = Image.open(io.BytesIO(contents)).convert("RGB")
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="The uploaded file could not be decoded as an image. Please provide a valid JPG, PNG, or WEBP photo."
+        )
+
+    return analyze_image_pil(
+        image=image,
+        filename=file.filename or "uploaded_image.jpg",
+        file_size_bytes=len(contents),
+        db=db
+    )
+
+
+@app.post("/predict-url")
+async def predict_url(url: str = Query(..., description="Public image URL to analyze"), db: Session = Depends(get_db)):
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="Invalid URL protocol. Must start with http:// or https://")
+
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) DeepGuardForensics/10.0"
+            }
+        )
+        with urllib.request.urlopen(req, timeout=12) as response:
+            contents = response.read()
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to fetch image from URL: {str(e)}"
+        )
+
+    if len(contents) > 15 * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail="The remote image exceeds the 15 MB limit."
+        )
+
+    try:
+        image = Image.open(io.BytesIO(contents)).convert("RGB")
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="The fetched URL content could not be decoded as an image."
+        )
+
+    parsed_name = url.split("?")[0].split("/")[-1] or "remote_image.jpg"
+    return analyze_image_pil(
+        image=image,
+        filename=parsed_name,
+        file_size_bytes=len(contents),
+        db=db
+    )
 
 
 

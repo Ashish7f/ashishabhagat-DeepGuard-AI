@@ -5,8 +5,8 @@ const SAMPLES = [
   {
     id: "real-1",
     name: "real-portrait.jpg",
-    label: "Authentic Portrait",
-    type: "Real Human",
+    label: "Studio Portrait",
+    type: "Authentic Human",
     path: "/samples/real-portrait.jpg",
     expected: "REAL",
     tag: "Studio Capture"
@@ -14,17 +14,17 @@ const SAMPLES = [
   {
     id: "fake-1",
     name: "deepfake-synth.jpg",
-    label: "Deepfake Synthesis",
-    type: "Face-Swap AI",
+    label: "Face-Swap Deepfake",
+    type: "Synthetic Artifact",
     path: "/samples/deepfake-synth.jpg",
     expected: "FAKE",
-    tag: "Synthetic Artifact"
+    tag: "Identity Swap"
   },
   {
     id: "real-2",
     name: "real-human.png",
-    label: "Natural Photo",
-    type: "Real Human",
+    label: "Natural Daylight",
+    type: "Authentic Human",
     path: "/samples/real-human.png",
     expected: "REAL",
     tag: "High Res Raw"
@@ -32,11 +32,47 @@ const SAMPLES = [
   {
     id: "fake-2",
     name: "ai-generated.jpg",
-    label: "AI Generated Face",
+    label: "Diffusion Synthesis",
     type: "Diffusion / GAN",
     path: "/samples/ai-generated.jpg",
     expected: "FAKE",
     tag: "Generative Model"
+  },
+  {
+    id: "fake-3",
+    name: "celebdf-swap.jpg",
+    label: "Celeb-DF Video Face",
+    type: "Video Deepfake",
+    path: "/samples/celebdf-swap.jpg",
+    expected: "FAKE",
+    tag: "Temporal Blend"
+  },
+  {
+    id: "fake-4",
+    name: "inpaint-seam.jpg",
+    label: "Inpainted Composite",
+    type: "Generative Inpaint",
+    path: "/samples/inpaint-seam.jpg",
+    expected: "FAKE",
+    tag: "Digital Splicing"
+  },
+  {
+    id: "real-3",
+    name: "real-candid.jpg",
+    label: "Candid Selfie",
+    type: "Authentic Human",
+    path: "/samples/real-candid.jpg",
+    expected: "REAL",
+    tag: "Natural Sensor"
+  },
+  {
+    id: "real-4",
+    name: "real-journalism.jpg",
+    label: "Photojournalism",
+    type: "Authentic Human",
+    path: "/samples/real-journalism.jpg",
+    expected: "REAL",
+    tag: "Press Lighting"
   }
 ];
 
@@ -89,7 +125,17 @@ function App() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [selectedAuditScan, setSelectedAuditScan] = useState(null);
 
+  const [inputTab, setInputTab] = useState("file"); // "file" | "camera" | "url"
+  const [urlInput, setUrlInput] = useState("");
+  const [urlLoading, setUrlLoading] = useState(false);
+  const [isCameraStreaming, setIsCameraStreaming] = useState(false);
+  const [cameraError, setCameraError] = useState("");
+  const [cloudFileNoticeOpen, setCloudFileNoticeOpen] = useState(false);
+
   const fileInputRef = useRef(null);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const cameraStreamRef = useRef(null);
 
   // Fetch Database stats
   const fetchDbStats = async (url = apiBaseUrl) => {
@@ -219,7 +265,7 @@ function App() {
     };
   }, [apiBaseUrl]);
 
-  // Handle file selection
+  // Handle file selection with eager read validation (catches OneDrive Error 0x8007016A)
   const processFile = (selectedFile) => {
     if (!selectedFile) return;
 
@@ -233,16 +279,29 @@ function App() {
       return;
     }
 
-    try {
+    // Eagerly read bytes using FileReader to validate local hydration and catch Windows OneDrive Error 0x8007016A
+    const reader = new FileReader();
+    reader.onload = () => {
       setFile(selectedFile);
-      setImage(URL.createObjectURL(selectedFile));
+      setImage(reader.result);
       setResult(null);
       setError("");
+      setCloudFileNoticeOpen(false);
       setViewMode("normal");
+    };
+    reader.onerror = () => {
+      setError(
+        "Windows Cloud File Notice (Error 0x8007016A): Windows could not read this file because OneDrive is currently paused or closed. See the quick fixes below, or use Live Camera / URL / Samples!"
+      );
+      setCloudFileNoticeOpen(true);
+    };
+    try {
+      reader.readAsDataURL(selectedFile);
     } catch {
       setError(
-        "Could not read the selected image from your device. If this file is stored in OneDrive or iCloud, please start OneDrive, or copy the image to a local folder."
+        "Could not read the selected image from your device. If stored in OneDrive, please ensure OneDrive is running or copy to a local folder."
       );
+      setCloudFileNoticeOpen(true);
     }
   };
 
@@ -253,7 +312,98 @@ function App() {
     event.target.value = "";
   };
 
-  // Clipboard Paste Support (Ctrl+V)
+  // Live Webcam Camera Handlers
+  const startWebcam = async () => {
+    setCameraError("");
+    setError("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
+        audio: false
+      });
+      cameraStreamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      setIsCameraStreaming(true);
+    } catch {
+      setCameraError(
+        "Camera access was denied or not available. Please allow camera permissions in your browser URL bar, or choose Browse Device / Image URL / Presets."
+      );
+      setIsCameraStreaming(false);
+    }
+  };
+
+  const stopWebcam = () => {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setIsCameraStreaming(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach((t) => t.stop());
+      }
+    };
+  }, []);
+
+  const snapWebcamPhoto = () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(
+      (blob) => {
+        if (blob) {
+          const snapFile = new File([blob], `live_camera_${Date.now()}.jpg`, {
+            type: "image/jpeg"
+          });
+          stopWebcam();
+          setInputTab("file");
+          processFile(snapFile);
+        }
+      },
+      "image/jpeg",
+      0.95
+    );
+  };
+
+  // Explicit Clipboard Paste Button
+  const handleClipboardPasteClick = async () => {
+    setError("");
+    try {
+      if (navigator.clipboard && navigator.clipboard.read) {
+        const clipboardItems = await navigator.clipboard.read();
+        for (const item of clipboardItems) {
+          const imageType = item.types.find((t) => t.startsWith("image/"));
+          if (imageType) {
+            const blob = await item.getType(imageType);
+            const pastedFile = new File([blob], `clipboard_${Date.now()}.${imageType.split("/")[1] || "png"}`, {
+              type: imageType
+            });
+            processFile(pastedFile);
+            return;
+          }
+        }
+        setError("No image currently found in your clipboard. Take a screenshot (Win + Shift + S), copy any photo, and click Paste again!");
+      } else {
+        setError("Clipboard reading is not supported directly in this browser. Press Ctrl + V on your keyboard with an image copied!");
+      }
+    } catch {
+      setError("Clipboard access permission was not granted. You can press Ctrl + V on your keyboard anytime to paste directly!");
+    }
+  };
+
+  // Keyboard Paste Support (Ctrl+V)
   useEffect(() => {
     const handlePaste = (e) => {
       const items = e.clipboardData?.items;
@@ -280,8 +430,126 @@ function App() {
     }
   };
 
+  // Web Image URL Handler
+  const handleUrlSubmit = async (e) => {
+    e?.preventDefault();
+    const cleanUrl = urlInput.trim();
+    if (!cleanUrl) return;
+    if (!cleanUrl.startsWith("http://") && !cleanUrl.startsWith("https://")) {
+      setError("Please provide a valid web image URL starting with http:// or https://");
+      return;
+    }
+
+    setUrlLoading(true);
+    setError("");
+
+    try {
+      // 1. Direct in-browser fetch if CORS permits
+      const res = await fetch(cleanUrl, { mode: "cors" });
+      if (res.ok) {
+        const blob = await res.blob();
+        if (blob.type.startsWith("image/")) {
+          const urlFile = new File([blob], cleanUrl.split("?")[0].split("/").pop() || "web_image.jpg", {
+            type: blob.type
+          });
+          processFile(urlFile);
+          setUrlLoading(false);
+          return;
+        }
+      }
+    } catch {
+      // Browser CORS blocked: fall through to backend proxy /predict-url
+    }
+
+    // 2. Call backend /predict-url directly
+    try {
+      setImage(cleanUrl);
+      setFile({
+        name: cleanUrl.split("?")[0].split("/").pop() || "web_image.jpg",
+        size: null,
+        isRemoteUrl: true,
+        remoteUrl: cleanUrl
+      });
+      setResult(null);
+      setViewMode("normal");
+      analyzeRemoteUrl(cleanUrl);
+    } catch (err) {
+      setError(`Failed to fetch image from URL: ${err.message || "Unknown error"}`);
+    } finally {
+      setUrlLoading(false);
+    }
+  };
+
+  const analyzeRemoteUrl = async (remoteUrl) => {
+    setLoading(true);
+    setLoadingStep(1);
+    setResult(null);
+    setError("");
+
+    const stepTimer1 = setTimeout(() => setLoadingStep(2), 600);
+    const stepTimer2 = setTimeout(() => setLoadingStep(3), 1200);
+
+    const targetBaseUrls = [];
+    if (apiBaseUrl === "/api") {
+      targetBaseUrls.push("/api/predict-url", "https://ashishabhagat-deepguard-ai.onrender.com/predict-url");
+    } else if (apiBaseUrl.includes("onrender.com")) {
+      targetBaseUrls.push("https://ashishabhagat-deepguard-ai.onrender.com/predict-url", "/api/predict-url");
+    } else {
+      targetBaseUrls.push(`${apiBaseUrl}/predict-url`);
+    }
+
+    let success = false;
+    let lastError = null;
+
+    for (let i = 0; i < targetBaseUrls.length; i++) {
+      const endpoint = `${targetBaseUrls[i]}?url=${encodeURIComponent(remoteUrl)}`;
+      const maxRetries = endpoint.includes("onrender.com") || endpoint.includes("/api") ? 2 : 1;
+
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          if (attempt > 1 || i > 0) {
+            setLoadingStep(4);
+          }
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 60000);
+          const response = await fetch(endpoint, {
+            method: "POST",
+            signal: controller.signal
+          });
+          clearTimeout(timeout);
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.detail || `Server responded with status ${response.status}`);
+          }
+          setResult(data);
+          setError("");
+          fetchDbStats(apiBaseUrl);
+          fetchHistory(historyFilter, apiBaseUrl);
+          success = true;
+          break;
+        } catch (err) {
+          lastError = err;
+          if (attempt < maxRetries) {
+            await new Promise((r) => setTimeout(r, 3000));
+          }
+        }
+      }
+      if (success) break;
+    }
+
+    if (!success) {
+      setError(`Could not analyze remote image: ${lastError?.message || "Inference connection error"}`);
+    }
+
+    clearTimeout(stepTimer1);
+    clearTimeout(stepTimer2);
+    setLoading(false);
+    setLoadingStep(0);
+  };
+
   // 1-Click sample loader
   const loadSample = async (sample) => {
+    stopWebcam();
     try {
       const response = await fetch(sample.path);
       const blob = await response.blob();
@@ -304,6 +572,10 @@ function App() {
   // Analyze image with dual-route fallback (Proxy & Direct)
   const analyzeImage = async () => {
     if (!file) return;
+
+    if (file.isRemoteUrl && file.remoteUrl) {
+      return analyzeRemoteUrl(file.remoteUrl);
+    }
 
     // Check for Browser Mixed-Content security block
     if (typeof window !== "undefined" && window.location.protocol === "https:" && apiBaseUrl.includes("localhost")) {
@@ -394,6 +666,7 @@ function App() {
   };
 
   const resetAnalysis = () => {
+    stopWebcam();
     setFile(null);
     setImage(null);
     setResult(null);
@@ -627,54 +900,385 @@ Verified via DeepGuard AI Platform`;
             </div>
           </div>
 
-          {/* DRAG & DROP OR UPLOAD ZONE */}
+          {/* MULTI-CHANNEL INPUT CHANNEL TABS */}
           {!image && (
-            <div
-              className="dropzone-area"
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.currentTarget.classList.add("drag-over");
-              }}
-              onDragLeave={(e) => {
-                e.currentTarget.classList.remove("drag-over");
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                e.currentTarget.classList.remove("drag-over");
-                handleDrop(e);
-              }}
-            >
-              <input
-                ref={fileInputRef}
-                className="dropzone-file-input"
-                type="file"
-                accept="image/png,image/jpeg,image/jpg,image/webp"
-                onChange={handleImageChange}
-                aria-label="Upload face photo for deepfake inspection"
-              />
+            <div className="input-mode-tabs">
+              <button
+                type="button"
+                className={`input-mode-tab ${inputTab === "file" ? "active" : ""}`}
+                onClick={() => {
+                  stopWebcam();
+                  setInputTab("file");
+                }}
+              >
+                📁 Browse Device
+              </button>
+              <button
+                type="button"
+                className={`input-mode-tab ${inputTab === "camera" ? "active" : ""}`}
+                onClick={() => {
+                  setInputTab("camera");
+                  startWebcam();
+                }}
+              >
+                📸 Live Camera
+              </button>
+              <button
+                type="button"
+                className={`input-mode-tab ${inputTab === "url" ? "active" : ""}`}
+                onClick={() => {
+                  stopWebcam();
+                  setInputTab("url");
+                }}
+              >
+                🌐 Web Image URL
+              </button>
+              <button
+                type="button"
+                className="input-mode-tab tab-clipboard"
+                onClick={handleClipboardPasteClick}
+                title="Paste image directly from clipboard (Ctrl+V)"
+              >
+                📋 Paste Clipboard
+              </button>
+              <button
+                type="button"
+                className={`input-mode-tab tab-helper ${cloudFileNoticeOpen ? "active" : ""}`}
+                onClick={() => setCloudFileNoticeOpen((prev) => !prev)}
+                title="Windows OneDrive 0x8007016A Troubleshooting"
+              >
+                ☁️ OneDrive Help
+              </button>
+            </div>
+          )}
 
-              <div className="dropzone-reticle">
-                <div className="reticle-corner tl" />
-                <div className="reticle-corner tr" />
-                <div className="reticle-corner bl" />
-                <div className="reticle-corner br" />
-                <div className="scanner-icon-container">
-                  <span className="scanner-glyph">◎</span>
+          {/* TAB 1: DRAG & DROP / FILE BROWSER */}
+          {!image && inputTab === "file" && (
+            <div className="file-input-wrapper">
+              <div
+                className="dropzone-area"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.classList.add("drag-over");
+                }}
+                onDragLeave={(e) => {
+                  e.currentTarget.classList.remove("drag-over");
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.classList.remove("drag-over");
+                  handleDrop(e);
+                }}
+              >
+                <input
+                  ref={fileInputRef}
+                  className="dropzone-file-input"
+                  type="file"
+                  accept="image/png,image/jpeg,image/jpg,image/webp"
+                  onChange={handleImageChange}
+                  aria-label="Upload face photo for deepfake inspection"
+                />
+
+                <div className="dropzone-reticle">
+                  <div className="reticle-corner tl" />
+                  <div className="reticle-corner tr" />
+                  <div className="reticle-corner bl" />
+                  <div className="reticle-corner br" />
+                  <div className="scanner-icon-container">
+                    <span className="scanner-glyph">◎</span>
+                  </div>
+                </div>
+
+                <h3 className="dropzone-title">Drop Face Image Here or Browse</h3>
+                <p className="dropzone-desc">
+                  Supports JPG, PNG, and WEBP formats • Up to 15 MB • Paste (Ctrl+V) supported
+                </p>
+
+                <button
+                  type="button"
+                  className="btn-primary select-file-btn"
+                  style={{ pointerEvents: "none" }}
+                >
+                  Choose Photo from Device
+                </button>
+              </div>
+
+              {/* Zero-Friction Alternative Input Shortcuts Bar */}
+              <div className="dropzone-quick-actions">
+                <span className="quick-actions-label">Direct zero-friction inputs:</span>
+                <button
+                  type="button"
+                  className="quick-action-pill"
+                  onClick={handleClipboardPasteClick}
+                >
+                  📋 Paste from Clipboard
+                </button>
+                <button
+                  type="button"
+                  className="quick-action-pill"
+                  onClick={() => {
+                    setInputTab("camera");
+                    startWebcam();
+                  }}
+                >
+                  📸 Use Live Camera
+                </button>
+                <button
+                  type="button"
+                  className="quick-action-pill"
+                  onClick={() => setInputTab("url")}
+                >
+                  🌐 Enter Web URL
+                </button>
+                <button
+                  type="button"
+                  className="quick-action-pill pill-onedrive"
+                  onClick={() => setCloudFileNoticeOpen(true)}
+                  title="Fix Error 0x8007016A"
+                >
+                  ☁️ OneDrive Error?
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: LIVE WEBCAM SCANNER */}
+          {!image && inputTab === "camera" && (
+            <div className="camera-workspace-card">
+              <div className="camera-stream-container">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="camera-video-element"
+                />
+                <canvas ref={canvasRef} style={{ display: "none" }} />
+
+                <div className="camera-hud-overlay">
+                  <div className="reticle-corner tl" />
+                  <div className="reticle-corner tr" />
+                  <div className="reticle-corner bl" />
+                  <div className="reticle-corner br" />
+                  <div className="camera-face-guide">
+                    <span className="camera-guide-label">ALIGN FACE IN CENTER RETICLE</span>
+                  </div>
+                  <div className="camera-hud-status">
+                    <span className="camera-live-dot" /> LIVE BIOMETRIC FORENSIC FEED
+                  </div>
                 </div>
               </div>
 
-              <h3 className="dropzone-title">Drop Face Image Here or Browse</h3>
-              <p className="dropzone-desc">
-                Supports JPG, PNG, and WEBP formats • Up to 15 MB • Paste (Ctrl+V) supported
-              </p>
+              {cameraError ? (
+                <div className="camera-error-banner">
+                  <span>⚠️ {cameraError}</span>
+                  <div className="camera-error-actions">
+                    <button type="button" className="btn-primary" onClick={startWebcam}>
+                      Retry Camera
+                    </button>
+                    <button type="button" className="btn-secondary" onClick={() => setInputTab("file")}>
+                      Switch to File Upload
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="camera-action-controls">
+                  <button
+                    type="button"
+                    className="btn-primary camera-snap-btn"
+                    onClick={snapWebcamPhoto}
+                  >
+                    <span>📸 Snap Photo & Inspect</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => {
+                      stopWebcam();
+                      setInputTab("file");
+                    }}
+                  >
+                    ✕ Close Camera
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
-              <button
-                type="button"
-                className="btn-primary select-file-btn"
-                style={{ pointerEvents: "none" }}
-              >
-                Choose Photo from Device
-              </button>
+          {/* TAB 3: WEB IMAGE URL SCANNER */}
+          {!image && inputTab === "url" && (
+            <div className="url-input-card">
+              <div className="url-card-header">
+                <span className="url-card-icon">🌐</span>
+                <div>
+                  <h3 className="url-card-title">Analyze Web Image via Remote URL</h3>
+                  <p className="url-card-subtitle">
+                    Paste any public image link from news websites, Twitter/X, Midjourney, Reddit, or Wikimedia. Bypasses Windows file storage entirely!
+                  </p>
+                </div>
+              </div>
+
+              <form className="url-input-form" onSubmit={handleUrlSubmit}>
+                <div className="url-input-wrapper">
+                  <input
+                    type="url"
+                    className="url-text-input"
+                    placeholder="https://images.example.com/suspect-portrait.jpg"
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                    required
+                  />
+                  {urlInput && (
+                    <button
+                      type="button"
+                      className="url-clear-btn"
+                      onClick={() => setUrlInput("")}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  className="btn-primary url-submit-btn"
+                  disabled={urlLoading || !urlInput.trim()}
+                >
+                  {urlLoading ? "Analyzing..." : "⚡ Inspect Remote Photo"}
+                </button>
+              </form>
+
+              <div className="url-sample-suggestions">
+                <span className="suggestions-label">Try sample link:</span>
+                <button
+                  type="button"
+                  className="url-suggestion-chip"
+                  onClick={() => {
+                    setUrlInput("https://raw.githubusercontent.com/Ashish7f/ashishabhagat-DeepGuard-AI/main/frontend/public/samples/deepfake-synth.jpg");
+                  }}
+                >
+                  Deepfake Synth
+                </button>
+                <button
+                  type="button"
+                  className="url-suggestion-chip"
+                  onClick={() => {
+                    setUrlInput("https://raw.githubusercontent.com/Ashish7f/ashishabhagat-DeepGuard-AI/main/frontend/public/samples/real-portrait.jpg");
+                  }}
+                >
+                  Authentic Portrait
+                </button>
+                <button
+                  type="button"
+                  className="url-suggestion-chip"
+                  onClick={() => {
+                    setUrlInput("https://raw.githubusercontent.com/Ashish7f/ashishabhagat-DeepGuard-AI/main/frontend/public/samples/ai-generated.jpg");
+                  }}
+                >
+                  Diffusion Face
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ONEDRIVE / CLOUD FILE TROUBLESHOOTING DRAWER */}
+          {!image && (cloudFileNoticeOpen || error?.includes("0x8007016A") || error?.includes("OneDrive")) && (
+            <div className="cloud-file-helper-card">
+              <div className="cloud-helper-header">
+                <div className="cloud-helper-badge">
+                  <span className="cloud-helper-icon">☁️</span>
+                  <span>WINDOWS ONEDRIVE SYNC ADVISORY</span>
+                </div>
+                <button
+                  type="button"
+                  className="cloud-helper-close"
+                  onClick={() => setCloudFileNoticeOpen(false)}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="cloud-helper-body">
+                <h4 className="cloud-helper-headline">
+                  Resolving Error 0x8007016A: "The cloud file provider is not running"
+                </h4>
+                <p className="cloud-helper-explanation">
+                  Windows 10/11 defaults your <strong>Pictures</strong>, <strong>Desktop</strong>, and <strong>Documents</strong> folders to Microsoft OneDrive using "Files On-Demand". When OneDrive is paused, signed out, or closed, selecting these files triggers this Windows shell error because the image is only stored in the cloud.
+                </p>
+
+                <div className="cloud-helper-fixes-grid">
+                  <div className="cloud-fix-card">
+                    <span className="fix-number">1</span>
+                    <div className="fix-content">
+                      <strong>Launch Microsoft OneDrive</strong>
+                      <p>Click Windows Start ⊞, search for <strong>OneDrive</strong>, and open it so your files can synchronize.</p>
+                    </div>
+                  </div>
+
+                  <div className="cloud-fix-card">
+                    <span className="fix-number">2</span>
+                    <div className="fix-content">
+                      <strong>Make Photo Always Available</strong>
+                      <p>In Windows File Explorer, right-click the photo and select <strong>"Always keep on this device"</strong>.</p>
+                    </div>
+                  </div>
+
+                  <div className="cloud-fix-card">
+                    <span className="fix-number">3</span>
+                    <div className="fix-content">
+                      <strong>Move to Local Folder</strong>
+                      <p>Save or copy your test pictures into your local <strong>Downloads</strong> folder where OneDrive does not interfere.</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="cloud-helper-bypass-bar">
+                  <span className="bypass-label">Zero-Friction In-App Workarounds (No File Dialog):</span>
+                  <div className="bypass-actions">
+                    <button
+                      type="button"
+                      className="btn-secondary bypass-btn"
+                      onClick={() => {
+                        setCloudFileNoticeOpen(false);
+                        handleClipboardPasteClick();
+                      }}
+                    >
+                      📋 Paste Clipboard
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary bypass-btn"
+                      onClick={() => {
+                        setCloudFileNoticeOpen(false);
+                        setInputTab("camera");
+                        startWebcam();
+                      }}
+                    >
+                      📸 Live Camera
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary bypass-btn"
+                      onClick={() => {
+                        setCloudFileNoticeOpen(false);
+                        setInputTab("url");
+                      }}
+                    >
+                      🌐 Web Image URL
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary bypass-btn"
+                      onClick={() => {
+                        setCloudFileNoticeOpen(false);
+                        loadSample(SAMPLES[0]);
+                      }}
+                    >
+                      ⚡ 1-Click Samples
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
