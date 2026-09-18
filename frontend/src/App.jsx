@@ -550,6 +550,8 @@ function App() {
   // 1-Click sample loader
   const loadSample = async (sample) => {
     stopWebcam();
+    setError("");
+    setCloudFileNoticeOpen(false);
     try {
       const response = await fetch(sample.path);
       const blob = await response.blob();
@@ -1192,7 +1194,11 @@ Verified via DeepGuard AI Platform`;
                 <button
                   type="button"
                   className="cloud-helper-close"
-                  onClick={() => setCloudFileNoticeOpen(false)}
+                  onClick={() => {
+                    setCloudFileNoticeOpen(false);
+                    setError("");
+                  }}
+                  title="Dismiss advisory"
                 >
                   ✕
                 </button>
@@ -1240,6 +1246,7 @@ Verified via DeepGuard AI Platform`;
                       className="btn-secondary bypass-btn"
                       onClick={() => {
                         setCloudFileNoticeOpen(false);
+                        setError("");
                         handleClipboardPasteClick();
                       }}
                     >
@@ -1250,6 +1257,7 @@ Verified via DeepGuard AI Platform`;
                       className="btn-secondary bypass-btn"
                       onClick={() => {
                         setCloudFileNoticeOpen(false);
+                        setError("");
                         setInputTab("camera");
                         startWebcam();
                       }}
@@ -1261,6 +1269,7 @@ Verified via DeepGuard AI Platform`;
                       className="btn-secondary bypass-btn"
                       onClick={() => {
                         setCloudFileNoticeOpen(false);
+                        setError("");
                         setInputTab("url");
                       }}
                     >
@@ -1271,6 +1280,7 @@ Verified via DeepGuard AI Platform`;
                       className="btn-secondary bypass-btn"
                       onClick={() => {
                         setCloudFileNoticeOpen(false);
+                        setError("");
                         loadSample(SAMPLES[0]);
                       }}
                     >
@@ -1754,7 +1764,7 @@ Verified via DeepGuard AI Platform`;
           )}
 
           {/* ERROR ALERT */}
-          {error && (
+          {error && !cloudFileNoticeOpen && !error.includes("0x8007016A") && (
             <div className="error-alert">
               <span className="error-icon">⚠️</span>
               <div className="error-content">
