@@ -265,7 +265,7 @@ function App() {
     };
   }, [apiBaseUrl]);
 
-  // Handle file selection with eager read validation (catches OneDrive Error 0x8007016A)
+  // Handle file selection with instant object URL loading
   const processFile = (selectedFile) => {
     if (!selectedFile) return;
 
@@ -279,27 +279,17 @@ function App() {
       return;
     }
 
-    // Eagerly read bytes using FileReader to validate local hydration and catch Windows OneDrive Error 0x8007016A
-    const reader = new FileReader();
-    reader.onload = () => {
+    try {
+      const objUrl = URL.createObjectURL(selectedFile);
       setFile(selectedFile);
-      setImage(reader.result);
+      setImage(objUrl);
       setResult(null);
       setError("");
       setCloudFileNoticeOpen(false);
       setViewMode("normal");
-    };
-    reader.onerror = () => {
-      setError(
-        "Windows Cloud File Notice (Error 0x8007016A): Windows could not read this file because OneDrive is currently paused or closed. See the quick fixes below, or use Live Camera / URL / Samples!"
-      );
-      setCloudFileNoticeOpen(true);
-    };
-    try {
-      reader.readAsDataURL(selectedFile);
     } catch {
       setError(
-        "Could not read the selected image from your device. If stored in OneDrive, please ensure OneDrive is running or copy to a local folder."
+        "Could not load the selected image. If this file is stored in an un-synced cloud folder, please open OneDrive or use the 1-Click Samples / Camera / URL options above."
       );
       setCloudFileNoticeOpen(true);
     }
