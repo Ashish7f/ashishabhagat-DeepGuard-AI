@@ -343,7 +343,7 @@ function App() {
     };
   }, [apiBaseUrl]);
 
-  // Handle file selection with permissive format checks, dual fallback, and auto-analysis
+  // Handle file selection with robust cloud-stub / phone MTP detection and auto-analysis
   const processFile = (selectedFile) => {
     if (!selectedFile) return;
 
@@ -360,42 +360,64 @@ function App() {
       return;
     }
 
-    const startAnalysisWithPreview = (loadedFile, previewUrl) => {
-      setFile(loadedFile);
-      setImage(previewUrl);
-      setResult(null);
-      setError("");
-      setCloudFileNoticeOpen(false);
-      setViewMode("normal");
+    // Guard against 0-byte ghost/cloud stub files (Error 0x8007016A)
+    if (selectedFile.size === 0) {
+      setError(
+        "Windows Cloud Error (0x8007016A): This photo is stored in the cloud or on a connected phone and contains 0 bytes on your PC. Please drag or copy this photo to your local 'Downloads' folder first, then select it."
+      );
+      setCloudFileNoticeOpen(true);
+      return;
+    }
 
-      // Auto-trigger forensic analysis immediately on file selection
-      setTimeout(() => {
-        analyzeImage(loadedFile);
-      }, 50);
-    };
-
+    // Read bytes via FileReader to verify accessibility from OS/MTP storage
     try {
-      const objUrl = URL.createObjectURL(selectedFile);
-      startAnalysisWithPreview(selectedFile, objUrl);
-    } catch {
-      try {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          startAnalysisWithPreview(selectedFile, e.target.result);
-        };
-        reader.onerror = () => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target.result;
+        if (!dataUrl || dataUrl.length < 50) {
           setError(
-            "Could not read the selected image from your drive. If this photo is stored in an un-synced OneDrive folder, please move it to Downloads or test with the 1-Click Samples below."
+            "Windows File Access Notice (0x8007016A): Could not read image data from your storage. Please copy this photo to your local 'Downloads' folder first."
+          );
+          setCloudFileNoticeOpen(true);
+          return;
+        }
+
+        const testImg = new window.Image();
+        testImg.onload = () => {
+          setFile(selectedFile);
+          setImage(dataUrl);
+          setResult(null);
+          setError("");
+          setCloudFileNoticeOpen(false);
+          setViewMode("normal");
+
+          // Auto-trigger forensic analysis immediately on valid photo
+          setTimeout(() => {
+            analyzeImage(selectedFile);
+          }, 50);
+        };
+        testImg.onerror = () => {
+          setError(
+            `Windows Storage Notice (0x8007016A): Could not decode "${selectedFile.name}". The photo could not be read from your phone or cloud storage. Please copy the photo into your local 'Downloads' folder first.`
           );
           setCloudFileNoticeOpen(true);
         };
-        reader.readAsDataURL(selectedFile);
-      } catch (err) {
+        testImg.src = dataUrl;
+      };
+
+      reader.onerror = () => {
         setError(
-          `Could not open image: ${err.message || "File access error"}. Please move the file to your Downloads folder or use the 1-Click Samples.`
+          `Windows Phone/Cloud Error (0x8007016A): "The cloud file provider is not running". Windows cannot read "${selectedFile.name}" directly from your connected device (V2334) or OneDrive. Please copy this photo to your local 'Downloads' folder first, or click one of the 1-Click Test Photos below.`
         );
         setCloudFileNoticeOpen(true);
-      }
+      };
+
+      reader.readAsDataURL(selectedFile);
+    } catch {
+      setError(
+        "Could not load the selected image. Please copy it to your local 'Downloads' folder or use the 1-Click Samples."
+      );
+      setCloudFileNoticeOpen(true);
     }
   };
 
