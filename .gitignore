@@ -7,6 +7,10 @@ __pycache__/
 # Datasets
 dataset/
 dataset_old/
+dataset_v9/
+dataset_v9_raw/
+dataset_v10/
+dataset_v10_raw/
 external_test/
 external_normalized/
 external_color_normalized/
@@ -17,9 +21,13 @@ celebdf_v2_eval/
 frontend/node_modules/
 frontend/dist/
 
-# Environment / logs
+# Environment / logs / databases
 .env
 *.log
+*.db
+*.sqlite
+*.sqlite3
+
 
 # Jupyter
 .ipynb_checkpoints/

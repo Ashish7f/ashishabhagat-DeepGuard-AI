@@ -2,11 +2,11 @@
 
 [![Backend Status](https://img.shields.io/badge/Render-Live-success?style=flat-square&logo=render)](https://ashishabhagat-deepguard-ai.onrender.com/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com)
-[![PyTorch](https://img.shields.io/badge/PyTorch-ResNet18_V8.1_TTA-EE4C2C.svg?style=flat-square&logo=pytorch)](https://pytorch.org)
+[![PyTorch](https://img.shields.io/badge/PyTorch-ConvNeXt_V10_OmniShield-EE4C2C.svg?style=flat-square&logo=pytorch)](https://pytorch.org)
 [![React](https://img.shields.io/badge/Frontend-React_19_+_Vite-61DAFB.svg?style=flat-square&logo=react)](https://vitejs.dev)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 
-DeepGuard AI is an enterprise-grade deepfake detection and neural forensic platform powered by a fine-tuned ResNet-18 architecture (**Model V8.1 Enhanced**) augmented with **3-Pass Test-Time Augmentation (TTA)** and multi-signal forensic analysis (high-frequency edge residuals, texture uniformity, and bilateral facial symmetry). Built with a high-performance FastAPI backend and a cyber-forensics React interface.
+DeepGuard AI is an enterprise-grade deepfake detection and neural forensic platform powered by a high-capacity ConvNeXt-Tiny architecture (**Model V10 OmniShield**) augmented with **3-Pass Test-Time Augmentation (TTA)**, multi-subject face localization, and multi-signal forensic analysis (high-frequency Laplacian edge residuals, ELA inpainting disparity, micro-texture uniformity, and bilateral facial symmetry). Built with a high-performance FastAPI backend and a cyber-forensics React interface.
 
 ---
 
@@ -19,7 +19,7 @@ DeepGuard AI is an enterprise-grade deepfake detection and neural forensic platf
 - **Interactive API Documentation:** [`https://ashishabhagat-deepguard-ai.onrender.com/docs`](https://ashishabhagat-deepguard-ai.onrender.com/docs)
 - **Health Check:** [`https://ashishabhagat-deepguard-ai.onrender.com/`](https://ashishabhagat-deepguard-ai.onrender.com/)
 - **Inference Endpoint:** [`https://ashishabhagat-deepguard-ai.onrender.com/predict`](https://ashishabhagat-deepguard-ai.onrender.com/predict)
-- **Model Checkpoints:** Hosted via [GitHub Releases v1.0.0](https://github.com/Ashish7f/ashishabhagat-DeepGuard-AI/releases/tag/v1.0.0)
+- **Model Checkpoints:** Hosted via [GitHub Releases v2.0.0](https://github.com/Ashish7f/ashishabhagat-DeepGuard-AI/releases/tag/v2.0.0)
 
 ---
 
@@ -61,8 +61,8 @@ DeepGuard AI is an enterprise-grade deepfake detection and neural forensic platf
                          │                             │
                          ▼                             │
                ┌───────────────────┐                   │
-               │ ResNet-18 (V8.1)  │                   │
-               │ Frozen Inference  │                   │
+               │ ConvNeXt-V10      │                   │
+               │ OmniShield Core   │                   │
                └─────────┬─────────┘                   │
                          │ Softmax Voting              │
                          ▼                             ▼
@@ -86,7 +86,7 @@ GET /
 ```json
 {
   "status": "online",
-  "model": "DeepGuard V8.1 Enhanced",
+  "model": "DeepGuard V10.0 (OmniShield ConvNeXt) + Multi-Subject Face Localization",
   "device": "cpu",
   "model_frozen": true,
   "tta_enabled": true
@@ -118,7 +118,7 @@ curl -X POST https://ashishabhagat-deepguard-ai.onrender.com/predict \
   "confidence": 100.0,
   "fake_probability": 0.0,
   "real_probability": 100.0,
-  "model": "DeepGuard V8.1 Enhanced",
+  "model": "DeepGuard V10.0 (OmniShield ConvNeXt) + Multi-Subject Face Localization",
   "device": "cuda",
   "forensics": {
     "frequency_coherence": 60.6,
@@ -172,13 +172,19 @@ Open [http://127.0.0.1:5173](http://127.0.0.1:5173) in your browser. Click the *
 
 ---
 
-## 📊 Empirical Benchmarks
+## 📊 Empirical Benchmarks (Model V10 OmniShield vs Prior Generations)
 
-| Evaluation Dataset | Metric | Score | Detail |
-| :--- | :--- | :--- | :--- |
-| **RVF10K Holdout Test** | Accuracy | **97.60%** | Evaluated on 1,500 balanced test samples (733/750 fake, 731/750 real) |
-| **Clean External Benchmark** | Accuracy | **100.00%** | Zero classification errors across holdout out-of-domain evaluation set |
-| **Warm Inference Latency** | Speed | **~51.6 ms** | Real-time multi-pass evaluation suitable for media moderation & KYC |
+| Evaluation Benchmark | Domain / Modality | Model V8.1 (ResNet-18) | Model V9 (ResNet-18 Multi) | **Model V10 OmniShield (ConvNeXt-Tiny)** |
+| :--- | :--- | :--- | :--- | :--- |
+| **Celeb-DF v2 Test (518 videos)** | Video Face Synthesis | 34.17% (0.29% fake) | 51.93% (58.8% fake) | **96.33%** (97.06% fake, 94.94% real) |
+| **InsightFace Face Swap** | Blended Neural Swap | 52.40% | 61.00% | **91.33%** (274/300) |
+| **Subtle Inpainting** | Latent Diffusion Fill | 64.20% | 73.50% | **99.33%** (298/300) |
+| **Text2Img Diffusion** | Stable Diffusion v1.5 | 88.50% | 93.00% | **99.00%** (297/300) |
+| **StyleGAN Faces** | Generative Faces (RVF) | 97.60% | 94.00% | **99.00%** (297/300) |
+| **Celeb-DF Face Holdout** | Video Face Crops | 48.20% | 58.00% | **99.33%** (298/300) |
+| **Clean External Benchmark** | Out-of-Domain Real/Fake | 100.00% | 100.00% | **95.92%** (F1: 0.9600) |
+| **Overall Holdout Validation** | 8,250 Multi-Domain Set | N/A | 82.60% (F1: 0.8287) | **96.64%** (F1: **0.9652**) |
+| **Warm Inference Latency** | Full TTA + Face Crop | ~51.6 ms | ~52.1 ms | **~54.3 ms** |
 
 ---
 

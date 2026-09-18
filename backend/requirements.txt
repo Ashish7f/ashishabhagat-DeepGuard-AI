@@ -4,3 +4,6 @@ python-multipart
 torch
 torchvision
 Pillow
+sqlalchemy>=2.0.0
+opencv-python-headless
+numpy>=1.24.0

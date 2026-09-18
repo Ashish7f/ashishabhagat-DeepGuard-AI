@@ -57,11 +57,100 @@ function App() {
   const [backendStatus, setBackendStatus] = useState({
     state: "checking", // "online" | "offline" | "checking"
     latency: null,
-    model: "DeepGuard V8.1 Enhanced",
+    model: "DeepGuard V10.0 OmniShield (ConvNeXt)",
     device: "cpu"
   });
 
+  // Persistent Database state & scan history
+  const [dbInfo, setDbInfo] = useState({
+    status: "connected",
+    engine: "SQLITE",
+    is_sqlite: true,
+    target: "Local File (deepguard.db)"
+  });
+  const [dbStats, setDbStats] = useState({
+    total_scans: 0,
+    fake_scans: 0,
+    real_scans: 0,
+    fake_percentage: 0,
+    real_percentage: 0,
+    average_confidence: 0,
+    average_latency_ms: 0
+  });
+  const [history, setHistory] = useState([]);
+  const [historyFilter, setHistoryFilter] = useState("ALL"); // ALL | FAKE | REAL
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [selectedAuditScan, setSelectedAuditScan] = useState(null);
+
   const fileInputRef = useRef(null);
+
+  // Fetch Database stats
+  const fetchDbStats = async (url = apiBaseUrl) => {
+    try {
+      const res = await fetch(`${url}/stats`);
+      if (res.ok) {
+        const statsData = await res.json();
+        setDbStats(statsData);
+        if (statsData.database) {
+          setDbInfo(statsData.database);
+        }
+      }
+    } catch {
+      // Offline fallback
+    }
+  };
+
+  // Fetch Database scan history
+  const fetchHistory = async (filter = historyFilter, url = apiBaseUrl) => {
+    setHistoryLoading(true);
+    try {
+      const query = filter !== "ALL" ? `?prediction=${filter}&limit=50` : "?limit=50";
+      const res = await fetch(`${url}/history${query}`);
+      if (res.ok) {
+        const data = await res.json();
+        setHistory(data.records || []);
+      }
+    } catch {
+      // Offline fallback
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  // Delete single scan record
+  const handleDeleteScan = async (scanId) => {
+    try {
+      const res = await fetch(`${apiBaseUrl}/history/${scanId}`, {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        setHistory((prev) => prev.filter((item) => item.id !== scanId));
+        fetchDbStats(apiBaseUrl);
+        if (selectedAuditScan?.id === scanId) {
+          setSelectedAuditScan(null);
+        }
+      }
+    } catch {
+      alert("Error deleting record from database.");
+    }
+  };
+
+  // Clear all database history
+  const handleClearHistory = async () => {
+    if (!window.confirm("Purge all forensic scan records from the database?")) return;
+    try {
+      const res = await fetch(`${apiBaseUrl}/history`, {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        setHistory([]);
+        fetchDbStats(apiBaseUrl);
+        setSelectedAuditScan(null);
+      }
+    } catch {
+      alert("Error clearing database.");
+    }
+  };
 
   // Check backend health telemetry
   const checkBackendHealth = async (urlToTest = apiBaseUrl) => {
@@ -78,9 +167,14 @@ function App() {
         setBackendStatus({
           state: "online",
           latency,
-          model: data.model || "DeepGuard V8.1 Enhanced",
+          model: data.model || "DeepGuard V10.0 OmniShield (ConvNeXt)",
           device: data.device || "cpu"
         });
+        if (data.database) {
+          setDbInfo(data.database);
+        }
+        fetchDbStats(urlToTest);
+        fetchHistory(historyFilter, urlToTest);
       } else {
         setBackendStatus({
           state: "offline",
@@ -98,6 +192,7 @@ function App() {
       });
     }
   };
+
 
   useEffect(() => {
     let isMounted = true;
@@ -198,6 +293,8 @@ function App() {
       }
 
       setResult(data);
+      fetchDbStats(apiBaseUrl);
+      fetchHistory(historyFilter, apiBaseUrl);
     } catch (err) {
       setError(
         `Analysis connection error: ${err.message || "Could not reach backend"}. Render free-tier instances may take 30-45s to spin up if dormant.`
@@ -226,7 +323,7 @@ Verdict: ${result.prediction === "FAKE" ? "SYNTHETIC / DEEPFAKE" : "AUTHENTIC HU
 Confidence: ${result.confidence}%
 Fake Probability: ${result.fake_probability}%
 Real Probability: ${result.real_probability}%
-Engine: ${result.model || "ResNet-18 V8.1 + TTA"}
+Engine: ${result.model || "ConvNeXt-Tiny V10.0 OmniShield + 3-Pass TTA"}
 Latency: ${result.latency_ms || "N/A"} ms
 Verified via DeepGuard AI Platform`;
 
@@ -280,7 +377,7 @@ Verified via DeepGuard AI Platform`;
           </div>
           <div className="brand-text">
             <span className="brand-title">DeepGuard AI</span>
-            <span className="brand-version">v8.1 Ultra</span>
+            <span className="brand-version">v10.0 OmniShield</span>
           </div>
         </div>
 
@@ -309,8 +406,22 @@ Verified via DeepGuard AI Platform`;
           </div>
         </div>
 
+        {/* DATABASE STATUS PILL */}
+        <div className="telemetry-pill db-telemetry-pill" title={`Database target: ${dbInfo.target}`}>
+          <span className="status-dot db-dot online" />
+          <div className="telemetry-details">
+            <span className="telemetry-state">
+              DB: {dbInfo.engine}
+            </span>
+            <span className="telemetry-latency">{dbStats.total_scans} logs</span>
+          </div>
+        </div>
+
         <nav className="nav-links">
           <a href="#detector">Detector</a>
+          <a href="#audit-log" className="nav-audit-link">
+            Audit Log <span className="nav-counter-pill">{dbStats.total_scans}</span>
+          </a>
           <a href="#benchmarks">Benchmarks</a>
           <a href="#architecture">Architecture</a>
           <a href="#faq">FAQ</a>
@@ -333,6 +444,7 @@ Verified via DeepGuard AI Platform`;
         </nav>
       </header>
 
+
       {/* HERO SECTION */}
       <section className="hero-section">
         <div className="hero-badge">
@@ -347,7 +459,7 @@ Verified via DeepGuard AI Platform`;
         </h1>
 
         <p className="hero-subtext">
-          DeepGuard AI leverages fine-tuned residual neural networks (V8.1)
+          DeepGuard AI leverages fine-tuned ConvNeXt-Tiny neural networks (V10.0 OmniShield)
           combined with multi-scale Test-Time Augmentation to detect deepfakes,
           GAN faces, and synthetic manipulations with verifiable confidence.
         </p>
@@ -526,6 +638,30 @@ Verified via DeepGuard AI Platform`;
                     <div className="target-crosshair" />
                   </div>
 
+                  {/* DETECTED FACE BOUNDING BOXES OVERLAY */}
+                  {result?.face_details && result.face_details.map((face) => (
+                    <div
+                      key={face.face_id}
+                      className={`face-bbox-overlay ${
+                        face.prediction === "FAKE" ? "bbox-fake" : "bbox-real"
+                      }`}
+                      style={{
+                        left: `${face.normalized_box.x}%`,
+                        top: `${face.normalized_box.y}%`,
+                        width: `${face.normalized_box.width}%`,
+                        height: `${face.normalized_box.height}%`
+                      }}
+                    >
+                      <div className="bbox-corner tl" />
+                      <div className="bbox-corner tr" />
+                      <div className="bbox-corner bl" />
+                      <div className="bbox-corner br" />
+                      <span className="bbox-tag">
+                        {face.prediction === "FAKE" ? "⚠️ SYNTHETIC" : "✓ REAL"} ({face.confidence}%)
+                      </span>
+                    </div>
+                  ))}
+
                   {/* ACTIVE SCANNING LASER BEAM */}
                   {loading && (
                     <div className="laser-scanner">
@@ -537,8 +673,14 @@ Verified via DeepGuard AI Platform`;
                   {/* Top Image Badge */}
                   <div className="preview-tag">
                     {file?.name || "Uploaded Face"} • {formatFileSize(file?.size)}
+                    {result?.faces_detected > 0 && (
+                      <span className="preview-face-count">
+                        {" "}• {result.faces_detected} {result.faces_detected === 1 ? "face" : "faces"} localized
+                      </span>
+                    )}
                   </div>
                 </div>
+
 
                 {/* ACTION BUTTONS (BEFORE RESULT) */}
                 {!result && !loading && (
@@ -569,7 +711,7 @@ Verified via DeepGuard AI Platform`;
                         {loadingStep === 1 &&
                           "Extracting canonical tensor & multi-scale projections..."}
                         {loadingStep === 2 &&
-                          "Executing ResNet-18 V8.1 3-pass TTA inference..."}
+                          "Executing ConvNeXt-Tiny V10.0 OmniShield 3-Pass TTA inference..."}
                         {loadingStep === 3 &&
                           "Evaluating frequency edge variance & bilateral symmetry..."}
                         {loadingStep === 0 &&
@@ -651,7 +793,7 @@ Verified via DeepGuard AI Platform`;
                         </div>
                       </div>
                       <span className="radial-caption">
-                        Decision Certainty (V8.1)
+                        Decision Certainty (V10.0)
                       </span>
                     </div>
 
@@ -698,11 +840,76 @@ Verified via DeepGuard AI Platform`;
                     </div>
                   </div>
 
+                  {/* SPLICING & GENERATIVE SCENERY WARNING */}
+                  {result.splicing_detected && (
+                    <div className="splicing-alert-banner">
+                      <span className="splicing-icon">⚠️</span>
+                      <div className="splicing-text">
+                        <strong>Composite / Spliced Scenery Disparity Detected</strong>
+                        <p>
+                          High sensor noise disparity ({result.forensics?.scene_splicing_ratio}x)
+                          detected across image quadrants, indicating artificial background scenery or an inserted subject.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* MULTI-SUBJECT LOCALIZATION BREAKDOWN */}
+                  {result.face_details && result.face_details.length > 0 && (
+                    <div className="multi-subject-panel">
+                      <div className="multi-subject-header">
+                        <h4 className="multi-subject-title">
+                          👥 Multi-Subject Inspection ({result.faces_detected} {result.faces_detected === 1 ? "Person" : "People"} Localized)
+                        </h4>
+                        <span className="multi-subject-badge">
+                          {result.analysis_mode === "face_localized" ? "Per-Face 3-Pass TTA" : "Scene Mode"}
+                        </span>
+                      </div>
+                      <div className="subject-cards-grid">
+                        {result.face_details.map((face) => (
+                          <div
+                            key={face.face_id}
+                            className={`subject-card ${
+                              face.prediction === "FAKE" ? "subject-fake" : "subject-real"
+                            }`}
+                          >
+                            <div className="subject-card-header">
+                              <span className="subject-id">Person #{face.face_id}</span>
+                              <span
+                                className={`verdict-pill ${
+                                  face.prediction === "FAKE" ? "pill-fake" : "pill-real"
+                                }`}
+                              >
+                                {face.prediction === "FAKE" ? "SYNTHETIC FACE" : "AUTHENTIC"}
+                              </span>
+                            </div>
+                            <div className="subject-stats">
+                              <div className="subject-stat-row">
+                                <span>Confidence:</span>
+                                <strong className={face.prediction === "FAKE" ? "text-crimson" : "text-emerald"}>
+                                  {face.confidence}%
+                                </strong>
+                              </div>
+                              <div className="subject-stat-row">
+                                <span>Fake / Real:</span>
+                                <span>{face.fake_probability}% / {face.real_probability}%</span>
+                              </div>
+                              <div className="subject-stat-row">
+                                <span>Framing:</span>
+                                <code>{face.box.width}x{face.box.height}px at ({face.box.x}, {face.box.y})</code>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* FORENSIC SIGNALS MATRIX */}
                   {result.forensics && (
                     <div className="forensic-signals-card">
                       <h4 className="signals-title">
-                        ✦ Multi-Signal Forensic Indicators
+                        ✦ Multi-Signal Forensic Indicators & Inpainting Analysis
                       </h4>
                       <div className="signals-grid">
                         <div className="signal-item">
@@ -759,6 +966,46 @@ Verified via DeepGuard AI Platform`;
                           </small>
                         </div>
 
+                        {result.forensics.ela_disparity !== undefined && (
+                          <div className="signal-item">
+                            <span className="signal-label">ELA Inpainting Disparity</span>
+                            <div className="signal-meter">
+                              <div
+                                className={`signal-fill ${result.forensics.ela_disparity > 45 ? "fill-fake" : ""}`}
+                                style={{
+                                  width: `${Math.min(100, result.forensics.ela_disparity)}%`
+                                }}
+                              />
+                            </div>
+                            <span className="signal-val">
+                              {result.forensics.ela_disparity}%
+                            </span>
+                            <small className="signal-desc">
+                              Compression seam anomaly
+                            </small>
+                          </div>
+                        )}
+
+                        {result.forensics.scene_splicing_ratio !== undefined && (
+                          <div className="signal-item">
+                            <span className="signal-label">Quadrant Noise Splicing</span>
+                            <div className="signal-meter">
+                              <div
+                                className={`signal-fill ${result.splicing_detected ? "fill-fake" : ""}`}
+                                style={{
+                                  width: `${Math.min(100, result.forensics.scene_splicing_ratio * 12)}%`
+                                }}
+                              />
+                            </div>
+                            <span className="signal-val">
+                              {result.forensics.scene_splicing_ratio}x
+                            </span>
+                            <small className="signal-desc">
+                              {result.splicing_detected ? "High Disparity (Composite)" : "Consistent sensor noise"}
+                            </small>
+                          </div>
+                        )}
+
                         <div className="signal-item">
                           <span className="signal-label">TTA Multi-Pass</span>
                           <div className="signal-meter">
@@ -775,7 +1022,16 @@ Verified via DeepGuard AI Platform`;
                     </div>
                   )}
 
+
                   {/* RESULT ACTIONS */}
+                  {result.scan_id && (
+                    <div className="db-persist-note">
+                      <span className="db-badge-dot" />
+                      <span>Logged to {dbInfo.engine} database as Record #{result.scan_id}</span>
+                      <a href="#audit-log" className="db-audit-jump">View in Audit Log ↓</a>
+                    </div>
+                  )}
+
                   <div className="result-action-bar">
                     <button
                       type="button"
@@ -824,8 +1080,321 @@ Verified via DeepGuard AI Platform`;
         </div>
       </main>
 
+      {/* DATABASE AUDIT LOG & SCAN HISTORY */}
+      <section id="audit-log" className="audit-log-section">
+        <div className="section-container">
+          <div className="section-header text-center">
+            <span className="section-badge">PERSISTENT DATABASE • AUDIT LOG</span>
+            <h2 className="section-title">
+              Forensic Scan History & Analytics
+            </h2>
+            <p className="section-sub">
+              Every analyzed image is automatically logged in the {dbInfo.is_sqlite ? "SQLite" : "PostgreSQL"} database with full forensic telemetry, confidence metrics, and millisecond latency.
+            </p>
+          </div>
+
+          {/* DATABASE TELEMETRY TILES */}
+          <div className="db-stats-grid">
+            <div className="db-stat-tile">
+              <span className="db-stat-icon">🗄️</span>
+              <div className="db-stat-content">
+                <span className="db-stat-value">{dbStats.total_scans}</span>
+                <span className="db-stat-title">Total Database Scans</span>
+              </div>
+            </div>
+
+            <div className="db-stat-tile tile-fake">
+              <span className="db-stat-icon">🚨</span>
+              <div className="db-stat-content">
+                <span className="db-stat-value text-crimson">
+                  {dbStats.fake_scans} <small className="stat-pct">({dbStats.fake_percentage}%)</small>
+                </span>
+                <span className="db-stat-title">Synthetic Manipulations</span>
+              </div>
+            </div>
+
+            <div className="db-stat-tile tile-real">
+              <span className="db-stat-icon">🛡️</span>
+              <div className="db-stat-content">
+                <span className="db-stat-value text-emerald">
+                  {dbStats.real_scans} <small className="stat-pct">({dbStats.real_percentage}%)</small>
+                </span>
+                <span className="db-stat-title">Authentic Media Verified</span>
+              </div>
+            </div>
+
+            <div className="db-stat-tile tile-perf">
+              <span className="db-stat-icon">⚡</span>
+              <div className="db-stat-content">
+                <span className="db-stat-value text-cyan">
+                  {dbStats.average_latency_ms || 0} <small className="stat-pct">ms avg</small>
+                </span>
+                <span className="db-stat-title">{dbInfo.engine} Engine ({dbInfo.is_sqlite ? "SQLite Local" : "Cloud Postgres"})</span>
+              </div>
+            </div>
+          </div>
+
+          {/* AUDIT LOG CONTROLS */}
+          <div className="audit-controls-panel glass-panel">
+            <div className="audit-filter-chips">
+              <span className="filter-label">Filter Verdict:</span>
+              <button
+                type="button"
+                className={`filter-chip ${historyFilter === "ALL" ? "active" : ""}`}
+                onClick={() => {
+                  setHistoryFilter("ALL");
+                  fetchHistory("ALL");
+                }}
+              >
+                All Records ({dbStats.total_scans})
+              </button>
+              <button
+                type="button"
+                className={`filter-chip chip-fake ${historyFilter === "FAKE" ? "active" : ""}`}
+                onClick={() => {
+                  setHistoryFilter("FAKE");
+                  fetchHistory("FAKE");
+                }}
+              >
+                Synthetic / Fake ({dbStats.fake_scans})
+              </button>
+              <button
+                type="button"
+                className={`filter-chip chip-real ${historyFilter === "REAL" ? "active" : ""}`}
+                onClick={() => {
+                  setHistoryFilter("REAL");
+                  fetchHistory("REAL");
+                }}
+              >
+                Authentic / Real ({dbStats.real_scans})
+              </button>
+            </div>
+
+            <div className="audit-actions-row">
+              <button
+                type="button"
+                className="btn-refresh-history"
+                onClick={() => {
+                  fetchHistory(historyFilter);
+                  fetchDbStats();
+                }}
+                disabled={historyLoading}
+              >
+                {historyLoading ? "↻ Syncing..." : "↻ Refresh"}
+              </button>
+              {history.length > 0 && (
+                <button
+                  type="button"
+                  className="btn-clear-history"
+                  onClick={handleClearHistory}
+                >
+                  🗑️ Clear History
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* HISTORICAL RECORDS LIST */}
+          <div className="audit-records-container">
+            {history.length === 0 ? (
+              <div className="empty-audit-card glass-panel">
+                <span className="empty-audit-glyph">📋</span>
+                <h4 className="empty-audit-title">No Scan Records In Database Yet</h4>
+                <p className="empty-audit-desc">
+                  Upload an image in the detector above or click one of the preset samples. Every detection is automatically recorded in your {dbInfo.engine} database.
+                </p>
+                <a href="#detector" className="btn-primary empty-jump-btn">
+                  Launch Live Detection ↑
+                </a>
+              </div>
+            ) : (
+              <div className="audit-table-wrapper glass-panel">
+                <table className="audit-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>File & Timestamp</th>
+                      <th>Verdict</th>
+                      <th>Confidence</th>
+                      <th>Forensic Signatures</th>
+                      <th>Latency</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.map((record) => (
+                      <tr
+                        key={record.id}
+                        className={`audit-row ${
+                          selectedAuditScan?.id === record.id ? "row-selected" : ""
+                        }`}
+                      >
+                        <td className="audit-id-cell">#{record.id}</td>
+                        <td className="audit-file-cell">
+                          <div className="file-info">
+                            <span className="file-name" title={record.filename}>
+                              {record.filename || "unknown_subject.jpg"}
+                            </span>
+                            <span className="file-date">
+                              {record.created_at
+                                ? new Date(record.created_at).toLocaleString()
+                                : "Just now"}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="audit-verdict-cell">
+                          <span
+                            className={`verdict-pill ${
+                              record.prediction === "FAKE"
+                                ? "pill-fake"
+                                : "pill-real"
+                            }`}
+                          >
+                            {record.prediction === "FAKE" ? "SYNTHETIC" : "AUTHENTIC"}
+                          </span>
+                        </td>
+                        <td className="audit-confidence-cell">
+                          <div className="conf-wrapper">
+                            <span className="conf-value">{record.confidence}%</span>
+                            <div className="conf-bar-bg">
+                              <div
+                                className={`conf-bar-fill ${
+                                  record.prediction === "FAKE"
+                                    ? "fill-fake"
+                                    : "fill-real"
+                                }`}
+                                style={{ width: `${record.confidence}%` }}
+                              />
+                            </div>
+                          </div>
+                        </td>
+                        <td className="audit-signals-cell">
+                          <div className="signal-tags-group">
+                            <span className="mini-signal-tag" title="Frequency Coherence">
+                              Freq: {record.frequency_coherence ?? "N/A"}%
+                            </span>
+                            <span className="mini-signal-tag" title="Texture Uniformity">
+                              Txt: {record.texture_uniformity ?? "N/A"}%
+                            </span>
+                            <span className="mini-signal-tag" title="Bilateral Symmetry">
+                              Sym: {record.bilateral_symmetry ?? "N/A"}%
+                            </span>
+                          </div>
+                        </td>
+                        <td className="audit-latency-cell">
+                          <span className="latency-text">{record.latency_ms} ms</span>
+                        </td>
+                        <td className="audit-action-cell">
+                          <button
+                            type="button"
+                            className="btn-audit-inspect"
+                            onClick={() =>
+                              setSelectedAuditScan(
+                                selectedAuditScan?.id === record.id ? null : record
+                              )
+                            }
+                            title="Inspect forensic breakdown"
+                          >
+                            {selectedAuditScan?.id === record.id ? "Close" : "Inspect"}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-audit-delete"
+                            onClick={() => handleDeleteScan(record.id)}
+                            title="Delete this record"
+                          >
+                            ✕
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* EXPANDED INSPECTION DETAIL CARD */}
+            {selectedAuditScan && (
+              <div className="audit-detail-drawer glass-panel">
+                <div className="drawer-header">
+                  <div className="drawer-title-group">
+                    <span className="drawer-badge">AUDIT INSPECTION</span>
+                    <h3 className="drawer-title">
+                      Scan #{selectedAuditScan.id} — {selectedAuditScan.filename}
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    className="drawer-close-btn"
+                    onClick={() => setSelectedAuditScan(null)}
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="drawer-content-grid">
+                  <div className="drawer-summary-card">
+                    <span className="drawer-sub">Official Determination</span>
+                    <div
+                      className={`drawer-verdict ${
+                        selectedAuditScan.prediction === "FAKE"
+                          ? "text-crimson"
+                          : "text-emerald"
+                      }`}
+                    >
+                      {selectedAuditScan.prediction === "FAKE"
+                        ? "SYNTHETIC / DEEPFAKE"
+                        : "AUTHENTIC HUMAN MEDIA"}
+                    </div>
+                    <div className="drawer-prob-breakdown">
+                      <div className="prob-pair">
+                        <span>Fake Probability:</span>
+                        <strong>{selectedAuditScan.fake_probability}%</strong>
+                      </div>
+                      <div className="prob-pair">
+                        <span>Real Probability:</span>
+                        <strong>{selectedAuditScan.real_probability}%</strong>
+                      </div>
+                      <div className="prob-pair">
+                        <span>Confidence Score:</span>
+                        <strong>{selectedAuditScan.confidence}%</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="drawer-signals-card">
+                    <span className="drawer-sub">Stored Forensic Telemetry</span>
+                    <div className="drawer-signal-row">
+                      <span>Frequency Coherence:</span>
+                      <strong>{selectedAuditScan.frequency_coherence}%</strong>
+                    </div>
+                    <div className="drawer-signal-row">
+                      <span>Texture Uniformity:</span>
+                      <strong>{selectedAuditScan.texture_uniformity}%</strong>
+                    </div>
+                    <div className="drawer-signal-row">
+                      <span>Bilateral Symmetry:</span>
+                      <strong>{selectedAuditScan.bilateral_symmetry}%</strong>
+                    </div>
+                    <div className="drawer-signal-row">
+                      <span>Inference Latency:</span>
+                      <strong>{selectedAuditScan.latency_ms} ms</strong>
+                    </div>
+                    <div className="drawer-signal-row">
+                      <span>Detection Engine:</span>
+                      <strong>{selectedAuditScan.model_version || "DeepGuard V10.0 OmniShield"}</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
       {/* BENCHMARKS & MODEL ARCHITECTURE TABS */}
       <section id="benchmarks" className="info-tabs-section">
+
         <div className="section-container">
           <div className="section-header text-center">
             <span className="section-badge">EMPIRICAL BENCHMARKS</span>
@@ -833,41 +1402,41 @@ Verified via DeepGuard AI Platform`;
               Evaluated on Diverse Real & Synthetic Datasets
             </h2>
             <p className="section-sub">
-              DeepGuard V8.1 undergoes strict out-of-domain validation to minimize
-              false positives and preserve generalization across compression levels.
+              DeepGuard V10.0 OmniShield undergoes strict multi-domain validation across
+              inpainting, face swaps, diffusion, and video frame synthesis to minimize false positives.
             </p>
           </div>
 
           <div className="stat-cards-grid">
             <div className="stat-card">
-              <span className="stat-num text-cyan">97.60%</span>
-              <span className="stat-label">RVF10K Test Accuracy</span>
+              <span className="stat-num text-cyan">96.64%</span>
+              <span className="stat-label">Validation Accuracy</span>
               <p className="stat-detail">
-                Rigorous evaluation across 1,500 balanced test samples (733/750 fake, 731/750 real).
+                F1-Score: 0.9652 on diverse multi-domain balanced holdout evaluation.
               </p>
             </div>
 
             <div className="stat-card">
-              <span className="stat-num text-emerald">100.00%</span>
+              <span className="stat-num text-emerald">95.92%</span>
               <span className="stat-label">Clean External Test</span>
               <p className="stat-detail">
-                Zero classification errors on curated out-of-domain holdout evaluation set.
+                Generalization on independent out-of-domain holdout evaluation set (47/49).
               </p>
             </div>
 
             <div className="stat-card">
-              <span className="stat-num text-purple">3-Pass</span>
-              <span className="stat-label">Test-Time Augmentation</span>
+              <span className="stat-num text-purple">99.3%</span>
+              <span className="stat-label">Video Face-Swap Defense</span>
               <p className="stat-detail">
-                Mitigates facial asymmetry variance and scale distortion on high-res photos.
+                Exceptional detection accuracy on Celeb-DF v2 video face-crop extractions.
               </p>
             </div>
 
             <div className="stat-card">
-              <span className="stat-num text-amber">&lt; 35ms</span>
+              <span className="stat-num text-amber">&lt; 45ms</span>
               <span className="stat-label">Inference Latency</span>
               <p className="stat-detail">
-                Ultra-fast CPU & CUDA inference suitable for real-time KYC and media moderation.
+                Fast ConvNeXt-Tiny neural inference suitable for real-time KYC and media moderation.
               </p>
             </div>
           </div>
@@ -906,10 +1475,10 @@ Verified via DeepGuard AI Platform`;
             <div className="pipeline-step">
               <div className="step-badge">03</div>
               <div className="step-icon">🧠</div>
-              <h3>ResNet-18 Deep Feature Extraction</h3>
+              <h3>ConvNeXt-Tiny Deep Feature Extraction</h3>
               <p>
-                Residual layers analyze texture micro-patterns, blending seams, and
-                unnatural smoothing common to diffusion models and GAN generators.
+                Modern 7x7 depthwise convolutions and inverted bottlenecks analyze texture micro-patterns,
+                blending seams, and unnatural generative smoothing.
               </p>
             </div>
 
@@ -984,7 +1553,7 @@ Verified via DeepGuard AI Platform`;
           </div>
           <div className="footer-meta">
             <p>
-              Engine: <strong>ResNet-18 V8.1 + TTA</strong> • License:{" "}
+              Engine: <strong>ConvNeXt-Tiny V10.0 OmniShield + 3-Pass TTA</strong> • License:{" "}
               <strong>MIT</strong>
             </p>
             <p className="footer-copy">
