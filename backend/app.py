@@ -436,6 +436,13 @@ def analyze_image_pil(
 ):
     start_time = time.perf_counter()
 
+    # Guard against excessively large inputs on CPU/Cloud instances
+    max_dim = max(image.size)
+    if max_dim > 1024:
+        scale = 1024.0 / max_dim
+        new_size = (int(image.width * scale), int(image.height * scale))
+        image = image.resize(new_size, Image.Resampling.BILINEAR)
+
     # 1. Detect all faces in the image
     detected_faces = extract_detected_faces(image)
     face_details = []

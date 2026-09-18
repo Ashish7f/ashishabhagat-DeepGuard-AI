@@ -1713,9 +1713,100 @@
   transition: all 0.2s ease;
 }
 
-.btn-retry-analysis:hover {
+.btn-retry-analysis:hover:not(:disabled) {
   background: rgba(255, 51, 102, 0.35);
   border-color: #ff3366;
+}
+
+.btn-retry-analysis:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.error-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.btn-wake-cloud {
+  padding: 7px 15px;
+  border-radius: 9px;
+  border: 1px solid rgba(0, 240, 255, 0.4);
+  background: rgba(0, 240, 255, 0.12);
+  color: #00f0ff;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.btn-wake-cloud:hover {
+  background: rgba(0, 240, 255, 0.22);
+  border-color: #00f0ff;
+  box-shadow: 0 0 14px rgba(0, 240, 255, 0.3);
+}
+
+.cloud-spinup-progress-card {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: rgba(10, 15, 29, 0.85);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  border-radius: 10px;
+}
+
+.spinup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.spinup-title {
+  color: #00f0ff;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.spinup-tag {
+  background: rgba(0, 240, 255, 0.15);
+  color: #70d6ff;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.spinup-track {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.spinup-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00f0ff, #7000ff);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.6);
+}
+
+.spinup-note {
+  font-size: 11.5px !important;
+  color: #94a3b8 !important;
+  margin: 0 !important;
+  line-height: 1.4 !important;
 }
 
 .error-dismiss {

@@ -131,6 +131,8 @@ function App() {
   const [isCameraStreaming, setIsCameraStreaming] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [cloudFileNoticeOpen, setCloudFileNoticeOpen] = useState(false);
+  const [warmingUp, setWarmingUp] = useState(false);
+  const [warmupProgress, setWarmupProgress] = useState(0);
 
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
@@ -205,45 +207,103 @@ function App() {
     }
   };
 
-  // Check backend health telemetry
+  // Check backend health telemetry with direct cloud fallback
   const checkBackendHealth = async (urlToTest = apiBaseUrl) => {
     const startTime = performance.now();
-    try {
-      const response = await fetch(`${urlToTest}/`, {
-        method: "GET",
-        signal: AbortSignal.timeout(20000)
-      });
-      const data = await response.json();
-      const latency = Math.round(performance.now() - startTime);
-
-      if (response.ok && data.status === "online") {
-        setBackendStatus({
-          state: "online",
-          latency,
-          model: data.model || "DeepGuard V10.0 OmniShield (ConvNeXt)",
-          device: data.device || "cpu"
-        });
-        if (data.database) {
-          setDbInfo(data.database);
-        }
-        fetchDbStats(urlToTest);
-        fetchHistory(historyFilter, urlToTest);
-      } else {
-        setBackendStatus({
-          state: "offline",
-          latency: null,
-          model: "Unavailable",
-          device: "N/A"
-        });
+    const candidatePings = [urlToTest];
+    if (urlToTest === "/api" || urlToTest.includes("onrender.com")) {
+      if (!candidatePings.includes("https://ashishabhagat-deepguard-ai.onrender.com")) {
+        candidatePings.push("https://ashishabhagat-deepguard-ai.onrender.com");
       }
-    } catch {
-      setBackendStatus({
-        state: "offline",
-        latency: null,
-        model: "Offline / Sleeping",
-        device: "N/A"
-      });
     }
+
+    for (const pingUrl of candidatePings) {
+      try {
+        const response = await fetch(`${pingUrl}/`, {
+          method: "GET",
+          signal: AbortSignal.timeout(8000)
+        });
+        const data = await response.json();
+        const latency = Math.round(performance.now() - startTime);
+
+        if (response.ok && data.status === "online") {
+          setBackendStatus({
+            state: "online",
+            latency,
+            model: data.model || "DeepGuard V10.0 OmniShield (ConvNeXt)",
+            device: data.device || "cpu"
+          });
+          if (data.database) {
+            setDbInfo(data.database);
+          }
+          fetchDbStats(urlToTest);
+          fetchHistory(historyFilter, urlToTest);
+          return;
+        }
+      } catch {
+        // Try next candidate ping
+      }
+    }
+
+    setBackendStatus({
+      state: "offline",
+      latency: null,
+      model: "Offline / Sleeping",
+      device: "N/A"
+    });
+  };
+
+  // Active Cloud Container Wake-Up Handler
+  const wakeUpCloudEngine = async (autoRetry = false) => {
+    setWarmingUp(true);
+    setWarmupProgress(15);
+    let currentP = 15;
+    const progressTimer = setInterval(() => {
+      currentP = Math.min(92, currentP + 4);
+      setWarmupProgress(currentP);
+    }, 1000);
+
+    const checkDirect = async () => {
+      try {
+        const res = await fetch("https://ashishabhagat-deepguard-ai.onrender.com/", {
+          signal: AbortSignal.timeout(6000)
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === "online") {
+            clearInterval(progressTimer);
+            setWarmupProgress(100);
+            setBackendStatus({
+              state: "online",
+              latency: 240,
+              model: data.model || "DeepGuard Neural Engine",
+              device: data.device || "cpu"
+            });
+            setTimeout(() => {
+              setWarmingUp(false);
+              setWarmupProgress(0);
+              setError("");
+              if (autoRetry && file) {
+                analyzeImage();
+              }
+            }, 800);
+            return true;
+          }
+        }
+      } catch {
+        // Still spinning up
+      }
+      return false;
+    };
+
+    for (let i = 0; i < 16; i++) {
+      const isOnline = await checkDirect();
+      if (isOnline) return;
+      await new Promise((r) => setTimeout(r, 2500));
+    }
+
+    clearInterval(progressTimer);
+    setWarmingUp(false);
   };
 
 
@@ -420,7 +480,7 @@ function App() {
     }
   };
 
-  // Web Image URL Handler
+  // Multi-proxy Web Image URL Loader
   const handleUrlSubmit = async (e) => {
     e?.preventDefault();
     const cleanUrl = urlInput.trim();
@@ -433,25 +493,45 @@ function App() {
     setUrlLoading(true);
     setError("");
 
-    try {
-      // 1. Direct in-browser fetch if CORS permits
-      const res = await fetch(cleanUrl, { mode: "cors" });
-      if (res.ok) {
-        const blob = await res.blob();
-        if (blob.type.startsWith("image/")) {
-          const urlFile = new File([blob], cleanUrl.split("?")[0].split("/").pop() || "web_image.jpg", {
-            type: blob.type
-          });
-          processFile(urlFile);
-          setUrlLoading(false);
-          return;
+    // Multi-candidate fetching: Direct -> AllOrigins -> CorsProxy
+    const proxyCandidates = [
+      cleanUrl,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(cleanUrl)}`,
+      `https://corsproxy.io/?url=${encodeURIComponent(cleanUrl)}`
+    ];
+
+    let downloadedFile = null;
+
+    for (const fetchCandidate of proxyCandidates) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        const res = await fetch(fetchCandidate, { signal: controller.signal });
+        clearTimeout(timeout);
+
+        if (res.ok) {
+          const blob = await res.blob();
+          if (blob.size > 500 && (blob.type.startsWith("image/") || blob.type === "application/octet-stream")) {
+            let filename = cleanUrl.split("?")[0].split("/").pop() || "web_image.jpg";
+            if (!filename.includes(".")) filename += ".jpg";
+            downloadedFile = new File([blob], filename, {
+              type: blob.type.startsWith("image/") ? blob.type : "image/jpeg"
+            });
+            break;
+          }
         }
+      } catch {
+        // try next proxy candidate
       }
-    } catch {
-      // Browser CORS blocked: fall through to backend proxy /predict-url
     }
 
-    // 2. Call backend /predict-url directly
+    if (downloadedFile) {
+      processFile(downloadedFile);
+      setUrlLoading(false);
+      return;
+    }
+
+    // Fallback: Backend /predict-url
     try {
       setImage(cleanUrl);
       setFile({
@@ -501,13 +581,21 @@ function App() {
             setLoadingStep(4);
           }
           const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 60000);
+          const timeout = setTimeout(() => controller.abort(), 45000);
           const response = await fetch(endpoint, {
             method: "POST",
             signal: controller.signal
           });
           clearTimeout(timeout);
-          const data = await response.json();
+
+          let data;
+          const contentType = response.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            data = await response.json();
+          } else {
+            throw new Error(`Server returned ${response.status}`);
+          }
+
           if (!response.ok) {
             throw new Error(data.detail || `Server responded with status ${response.status}`);
           }
@@ -520,7 +608,7 @@ function App() {
         } catch (err) {
           lastError = err;
           if (attempt < maxRetries) {
-            await new Promise((r) => setTimeout(r, 3000));
+            await new Promise((r) => setTimeout(r, 2000));
           }
         }
       }
@@ -561,6 +649,60 @@ function App() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
+  // Pre-inference client-side image optimization (prevents massive 5MB-15MB payload upload timeouts)
+  const optimizeImageForInference = async (inputFile) => {
+    if (!inputFile || typeof window === "undefined") return inputFile;
+    // If already lightweight under 350KB, send directly
+    if (inputFile.size && inputFile.size < 350 * 1024) return inputFile;
+
+    return new Promise((resolve) => {
+      try {
+        const img = new window.Image();
+        const objectUrl = URL.createObjectURL(inputFile);
+        img.onload = () => {
+          URL.revokeObjectURL(objectUrl);
+          const maxDim = 1024;
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob(
+            (blob) => {
+              if (blob && blob.size > 0 && blob.size < (inputFile.size || Infinity)) {
+                const optimizedFile = new File([blob], inputFile.name || "analyzed_photo.jpg", {
+                  type: "image/jpeg"
+                });
+                resolve(optimizedFile);
+              } else {
+                resolve(inputFile);
+              }
+            },
+            "image/jpeg",
+            0.88
+          );
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(objectUrl);
+          resolve(inputFile);
+        };
+        img.src = objectUrl;
+      } catch {
+        resolve(inputFile);
+      }
+    });
+  };
+
   // Analyze image with dual-route fallback (Proxy & Direct)
   const analyzeImage = async () => {
     if (!file) return;
@@ -585,25 +727,52 @@ function App() {
     const stepTimer1 = setTimeout(() => setLoadingStep(2), 600);
     const stepTimer2 = setTimeout(() => setLoadingStep(3), 1200);
 
-    const formData = new FormData();
-    formData.append("file", file);
+    // Optimize image payload client-side to prevent network/proxy timeouts
+    const fileToUpload = await optimizeImageForInference(file);
 
-    // Build ordered list of candidate URLs for maximum resilience
-    const targetUrls = [];
+    const formData = new FormData();
+    formData.append("file", fileToUpload);
+
+    // Build ordered list of candidate targets with dedicated per-route timeouts
+    const candidateRoutes = [];
     if (apiBaseUrl === "/api") {
-      targetUrls.push("/api/predict", "https://ashishabhagat-deepguard-ai.onrender.com/predict");
+      // 1. Same-origin Vercel rewrite (12s timeout)
+      candidateRoutes.push({
+        url: "/api/predict",
+        timeoutMs: 12000,
+        name: "Vercel Edge Proxy"
+      });
+      // 2. Direct Render cloud endpoint (65s timeout to allow cold-start container spin-up)
+      candidateRoutes.push({
+        url: "https://ashishabhagat-deepguard-ai.onrender.com/predict",
+        timeoutMs: 65000,
+        name: "Direct Render Cloud"
+      });
     } else if (apiBaseUrl.includes("onrender.com")) {
-      targetUrls.push("https://ashishabhagat-deepguard-ai.onrender.com/predict", "/api/predict");
+      candidateRoutes.push({
+        url: "https://ashishabhagat-deepguard-ai.onrender.com/predict",
+        timeoutMs: 65000,
+        name: "Direct Render Cloud"
+      });
+      candidateRoutes.push({
+        url: "/api/predict",
+        timeoutMs: 12000,
+        name: "Vercel Edge Proxy"
+      });
     } else {
-      targetUrls.push(`${apiBaseUrl}/predict`);
+      candidateRoutes.push({
+        url: `${apiBaseUrl}/predict`,
+        timeoutMs: 30000,
+        name: "Local Backend"
+      });
     }
 
     let success = false;
     let lastError = null;
 
-    for (let i = 0; i < targetUrls.length; i++) {
-      const targetUrl = targetUrls[i];
-      const maxRetries = targetUrl.includes("onrender.com") || targetUrl.includes("/api") ? 2 : 1;
+    for (let i = 0; i < candidateRoutes.length; i++) {
+      const route = candidateRoutes[i];
+      const maxRetries = route.url.includes("onrender.com") ? 2 : 1;
 
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
@@ -612,16 +781,26 @@ function App() {
           }
 
           const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 60000); // 60s for Render cold-starts
+          const timeoutId = setTimeout(() => controller.abort(), route.timeoutMs);
 
-          const response = await fetch(targetUrl, {
+          const response = await fetch(route.url, {
             method: "POST",
             body: formData,
             signal: controller.signal
           });
-          clearTimeout(timeout);
+          clearTimeout(timeoutId);
 
-          const data = await response.json();
+          let data;
+          const contentType = response.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            data = await response.json();
+          } else {
+            const rawText = await response.text();
+            if (response.status === 504 || rawText.includes("Gateway Timeout")) {
+              throw new Error("Cloud gateway timeout (Vercel 10s limit). Direct connection will now take over...");
+            }
+            throw new Error(`Server returned status ${response.status}`);
+          }
 
           if (!response.ok) {
             throw new Error(data.detail || `Server responded with status ${response.status}`);
@@ -629,15 +808,20 @@ function App() {
 
           setResult(data);
           setError("");
+          setBackendStatus((prev) => ({
+            ...prev,
+            state: "online",
+            latency: data.latency_ms || prev.latency
+          }));
           fetchDbStats(apiBaseUrl);
           fetchHistory(historyFilter, apiBaseUrl);
           success = true;
           break;
         } catch (err) {
           lastError = err;
+          // If Vercel timed out, instantly fall through to direct Render
           if (attempt < maxRetries) {
-            // Wait 3s before retry on sleeping server
-            await new Promise((r) => setTimeout(r, 3000));
+            await new Promise((r) => setTimeout(r, 2000));
           }
         }
       }
@@ -646,9 +830,21 @@ function App() {
     }
 
     if (!success) {
-      setError(
-        `Analysis connection notice: ${lastError?.message || "Could not reach inference engine"}. Render cloud free-tier instances sleep when inactive and may take 30-45s to spin up. Please click 'Retry Analysis' below.`
-      );
+      const isConnectionTimeout =
+        lastError?.name === "AbortError" ||
+        lastError?.message?.includes("Failed to fetch") ||
+        lastError?.message?.includes("NetworkError") ||
+        lastError?.message?.includes("Gateway Timeout");
+
+      if (isConnectionTimeout) {
+        setError(
+          `Analysis connection notice: Render cloud free-tier instances sleep when inactive and may take 30-45s to spin up. Please click 'Retry Analysis' or 'Wake Up Cloud Server' below.`
+        );
+        // Ping health in background to accelerate container spin-up
+        checkBackendHealth("https://ashishabhagat-deepguard-ai.onrender.com");
+      } else {
+        setError(`Analysis error: ${lastError?.message || "Could not complete neural inference"}`);
+      }
     }
 
     clearTimeout(stepTimer1);
@@ -1760,18 +1956,47 @@ Verified via DeepGuard AI Platform`;
               <div className="error-content">
                 <strong>Analysis Notice</strong>
                 <p>{error}</p>
-                {file && (
-                  <button
-                    type="button"
-                    className="btn-retry-analysis"
-                    onClick={() => {
-                      setError("");
-                      analyzeImage();
-                    }}
-                  >
-                    🔄 Retry Analysis Now
-                  </button>
+
+                {warmingUp && (
+                  <div className="cloud-spinup-progress-card">
+                    <div className="spinup-header">
+                      <span className="spinup-title">⚡ Waking up Render Cloud Container ({warmupProgress}%)</span>
+                      <span className="spinup-tag">Free Tier Spin-up</span>
+                    </div>
+                    <div className="spinup-track">
+                      <div className="spinup-fill" style={{ width: `${warmupProgress}%` }} />
+                    </div>
+                    <p className="spinup-note">
+                      Render free-tier instances sleep when idle. We are warming up the neural container now—analysis will automatically execute as soon as the engine is ready!
+                    </p>
+                  </div>
                 )}
+
+                <div className="error-action-row">
+                  {file && (
+                    <button
+                      type="button"
+                      className="btn-retry-analysis"
+                      disabled={loading || warmingUp}
+                      onClick={() => {
+                        setError("");
+                        analyzeImage();
+                      }}
+                    >
+                      {loading ? "Analyzing..." : "🔄 Retry Analysis Now"}
+                    </button>
+                  )}
+
+                  {backendStatus.state !== "online" && !warmingUp && (
+                    <button
+                      type="button"
+                      className="btn-secondary btn-wake-cloud"
+                      onClick={() => wakeUpCloudEngine(true)}
+                    >
+                      ☁️ Wake Up Cloud Server
+                    </button>
+                  )}
+                </div>
               </div>
               <button
                 type="button"
