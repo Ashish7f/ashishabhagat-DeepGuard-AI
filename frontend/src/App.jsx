@@ -233,11 +233,17 @@ function App() {
       return;
     }
 
-    setFile(selectedFile);
-    setImage(URL.createObjectURL(selectedFile));
-    setResult(null);
-    setError("");
-    setViewMode("normal");
+    try {
+      setFile(selectedFile);
+      setImage(URL.createObjectURL(selectedFile));
+      setResult(null);
+      setError("");
+      setViewMode("normal");
+    } catch {
+      setError(
+        "Could not read the selected image from your device. If this file is stored in OneDrive or iCloud, please start OneDrive, or copy the image to a local folder."
+      );
+    }
   };
 
   const handleImageChange = (event) => {
