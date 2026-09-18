@@ -3,6 +3,42 @@ import "./App.css";
 
 const SAMPLES = [
   {
+    id: "user-fake-1",
+    name: "fake1.jpg",
+    label: "User Fake #1",
+    type: "Deepfake Detection",
+    path: "/samples/fake1.jpg",
+    expected: "FAKE",
+    tag: "User Dataset"
+  },
+  {
+    id: "user-real-1",
+    name: "real1.jpg",
+    label: "User Real #1",
+    type: "Authentic Human",
+    path: "/samples/real1.jpg",
+    expected: "REAL",
+    tag: "User Dataset"
+  },
+  {
+    id: "user-fake-2",
+    name: "fake2.jpg",
+    label: "User Fake #2",
+    type: "Deepfake Detection",
+    path: "/samples/fake2.jpg",
+    expected: "FAKE",
+    tag: "User Dataset"
+  },
+  {
+    id: "user-real-2",
+    name: "real2.jpg",
+    label: "User Real #2",
+    type: "Authentic Human",
+    path: "/samples/real2.jpg",
+    expected: "REAL",
+    tag: "User Dataset"
+  },
+  {
     id: "real-1",
     name: "real-portrait.jpg",
     label: "Studio Portrait",
@@ -21,15 +57,6 @@ const SAMPLES = [
     tag: "Identity Swap"
   },
   {
-    id: "real-2",
-    name: "real-human.png",
-    label: "Natural Daylight",
-    type: "Authentic Human",
-    path: "/samples/real-human.png",
-    expected: "REAL",
-    tag: "High Res Raw"
-  },
-  {
     id: "fake-2",
     name: "ai-generated.jpg",
     label: "Diffusion Synthesis",
@@ -46,15 +73,6 @@ const SAMPLES = [
     path: "/samples/celebdf-swap.jpg",
     expected: "FAKE",
     tag: "Temporal Blend"
-  },
-  {
-    id: "fake-4",
-    name: "inpaint-seam.jpg",
-    label: "Inpainted Composite",
-    type: "Generative Inpaint",
-    path: "/samples/inpaint-seam.jpg",
-    expected: "FAKE",
-    tag: "Digital Splicing"
   },
   {
     id: "real-3",
@@ -325,41 +343,70 @@ function App() {
     };
   }, [apiBaseUrl]);
 
-  // Handle file selection with instant object URL loading
+  // Handle file selection with permissive format checks, dual fallback, and auto-analysis
   const processFile = (selectedFile) => {
     if (!selectedFile) return;
 
-    if (!selectedFile.type.startsWith("image/")) {
-      setError("Please select a valid image file (JPG, PNG, WEBP).");
+    // Permissive image validation: MIME prefix OR common image file extension
+    const isImageMime = selectedFile.type && selectedFile.type.startsWith("image/");
+    const isImageExt = /\.(jpe?g|png|webp|jfif|avif|bmp|tiff|heic)$/i.test(selectedFile.name || "");
+    if (!isImageMime && !isImageExt) {
+      setError("Please select a valid image file (JPG, PNG, WEBP, JFIF).");
       return;
     }
 
-    if (selectedFile.size > 15 * 1024 * 1024) {
-      setError("Image size exceeds 15 MB limit. Please select a smaller photo.");
+    if (selectedFile.size > 20 * 1024 * 1024) {
+      setError("Image size exceeds 20 MB limit. Please select a smaller photo.");
       return;
     }
 
-    try {
-      const objUrl = URL.createObjectURL(selectedFile);
-      setFile(selectedFile);
-      setImage(objUrl);
+    const startAnalysisWithPreview = (loadedFile, previewUrl) => {
+      setFile(loadedFile);
+      setImage(previewUrl);
       setResult(null);
       setError("");
       setCloudFileNoticeOpen(false);
       setViewMode("normal");
+
+      // Auto-trigger forensic analysis immediately on file selection
+      setTimeout(() => {
+        analyzeImage(loadedFile);
+      }, 50);
+    };
+
+    try {
+      const objUrl = URL.createObjectURL(selectedFile);
+      startAnalysisWithPreview(selectedFile, objUrl);
     } catch {
-      setError(
-        "Could not load the selected image. If this file is stored in an un-synced cloud folder, please open OneDrive or use the 1-Click Samples / Camera / URL options above."
-      );
-      setCloudFileNoticeOpen(true);
+      try {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          startAnalysisWithPreview(selectedFile, e.target.result);
+        };
+        reader.onerror = () => {
+          setError(
+            "Could not read the selected image from your drive. If this photo is stored in an un-synced OneDrive folder, please move it to Downloads or test with the 1-Click Samples below."
+          );
+          setCloudFileNoticeOpen(true);
+        };
+        reader.readAsDataURL(selectedFile);
+      } catch (err) {
+        setError(
+          `Could not open image: ${err.message || "File access error"}. Please move the file to your Downloads folder or use the 1-Click Samples.`
+        );
+        setCloudFileNoticeOpen(true);
+      }
     }
   };
 
   const handleImageChange = (event) => {
-    if (event.target.files && event.target.files[0]) {
-      processFile(event.target.files[0]);
+    const selected = event.target.files?.[0];
+    if (selected) {
+      processFile(selected);
     }
-    event.target.value = "";
+    setTimeout(() => {
+      if (event.target) event.target.value = "";
+    }, 150);
   };
 
   // Live Webcam Camera Handlers
@@ -550,7 +597,7 @@ function App() {
     }
   };
 
-  const analyzeRemoteUrl = async (remoteUrl) => {
+  async function analyzeRemoteUrl(remoteUrl) {
     setLoading(true);
     setLoadingStep(1);
     setResult(null);
@@ -649,8 +696,7 @@ function App() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  // Pre-inference client-side image optimization (prevents massive 5MB-15MB payload upload timeouts)
-  const optimizeImageForInference = async (inputFile) => {
+  async function optimizeImageForInference(inputFile) {
     if (!inputFile || typeof window === "undefined") return inputFile;
     // If already lightweight under 350KB, send directly
     if (inputFile.size && inputFile.size < 350 * 1024) return inputFile;
@@ -704,11 +750,12 @@ function App() {
   };
 
   // Analyze image with dual-route fallback (Proxy & Direct)
-  const analyzeImage = async () => {
-    if (!file) return;
+  async function analyzeImage(explicitFile = null) {
+    const targetFile = explicitFile || file;
+    if (!targetFile) return;
 
-    if (file.isRemoteUrl && file.remoteUrl) {
-      return analyzeRemoteUrl(file.remoteUrl);
+    if (targetFile.isRemoteUrl && targetFile.remoteUrl) {
+      return analyzeRemoteUrl(targetFile.remoteUrl);
     }
 
     // Check for Browser Mixed-Content security block
@@ -728,7 +775,7 @@ function App() {
     const stepTimer2 = setTimeout(() => setLoadingStep(3), 1200);
 
     // Optimize image payload client-side to prevent network/proxy timeouts
-    const fileToUpload = await optimizeImageForInference(file);
+    const fileToUpload = await optimizeImageForInference(targetFile);
 
     const formData = new FormData();
     formData.append("file", fileToUpload);
@@ -1145,6 +1192,7 @@ Verified via DeepGuard AI Platform`;
             <div className="file-input-wrapper">
               <div
                 className="dropzone-area"
+                onClick={() => fileInputRef.current?.click()}
                 onDragOver={(e) => {
                   e.preventDefault();
                   e.currentTarget.classList.add("drag-over");
@@ -1162,8 +1210,9 @@ Verified via DeepGuard AI Platform`;
                   ref={fileInputRef}
                   className="dropzone-file-input"
                   type="file"
-                  accept="image/png,image/jpeg,image/jpg,image/webp"
+                  accept="image/*,.jpg,.jpeg,.png,.webp,.jfif,.avif"
                   onChange={handleImageChange}
+                  onClick={(e) => e.stopPropagation()}
                   aria-label="Upload face photo for deepfake inspection"
                 />
 
@@ -1179,27 +1228,46 @@ Verified via DeepGuard AI Platform`;
 
                 <h3 className="dropzone-title">Drop Face Image Here or Browse</h3>
                 <p className="dropzone-desc">
-                  Supports JPG, PNG, and WEBP formats • Up to 15 MB • Paste (Ctrl+V) supported
+                  Supports JPG, PNG, WEBP & JFIF • Auto-analyzes upon selection • Up to 20 MB
                 </p>
 
                 <button
                   type="button"
                   className="btn-primary select-file-btn"
-                  style={{ pointerEvents: "none" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    fileInputRef.current?.click();
+                  }}
                 >
-                  Choose Photo from Device
+                  📂 Choose Photo from Device
                 </button>
               </div>
 
               {/* Zero-Friction Alternative Input Shortcuts Bar */}
               <div className="dropzone-quick-actions">
-                <span className="quick-actions-label">Direct zero-friction inputs:</span>
+                <span className="quick-actions-label">1-Click Test Photos:</span>
+                <button
+                  type="button"
+                  className="quick-action-pill highlight-pill"
+                  onClick={() => loadSample(SAMPLES[0])}
+                  title="Test fake1.jpg immediately"
+                >
+                  ⚡ Test User Fake #1 (fake1.jpg)
+                </button>
+                <button
+                  type="button"
+                  className="quick-action-pill highlight-pill"
+                  onClick={() => loadSample(SAMPLES[1])}
+                  title="Test real1.jpg immediately"
+                >
+                  🛡️ Test User Real #1 (real1.jpg)
+                </button>
                 <button
                   type="button"
                   className="quick-action-pill"
                   onClick={handleClipboardPasteClick}
                 >
-                  📋 Paste from Clipboard
+                  📋 Paste Clipboard
                 </button>
                 <button
                   type="button"
@@ -1209,7 +1277,7 @@ Verified via DeepGuard AI Platform`;
                     startWebcam();
                   }}
                 >
-                  📸 Use Live Camera
+                  📸 Live Camera
                 </button>
                 <button
                   type="button"

@@ -666,6 +666,19 @@
   transform: translateY(-1px);
 }
 
+.quick-action-pill.highlight-pill {
+  background: rgba(0, 240, 255, 0.12);
+  border-color: rgba(0, 240, 255, 0.4);
+  color: #00f0ff;
+  font-weight: 600;
+}
+
+.quick-action-pill.highlight-pill:hover {
+  background: rgba(0, 240, 255, 0.25);
+  border-color: #00f0ff;
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.4);
+}
+
 .quick-action-pill.pill-onedrive {
   margin-left: auto;
   color: #38bdf8;
