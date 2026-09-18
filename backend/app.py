@@ -7,7 +7,8 @@ from torchvision import models, transforms
 from PIL import Image
 
 from typing import Optional
-from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Query
+from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Query, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
@@ -207,6 +208,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal inference error: {str(exc)}"},
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
 
 
 # ============================================================
@@ -412,31 +431,13 @@ async def predict(file: UploadFile = File(...), db: Session = Depends(get_db)):
 
     start_time = time.perf_counter()
 
-    # Validate file type
-    allowed_types = {
-        "image/jpeg",
-        "image/png",
-        "image/jpg",
-        "image/webp"
-    }
-
-    if file.content_type not in allowed_types:
-        raise HTTPException(
-            status_code=400,
-            detail="Please upload a JPG, JPEG, PNG, or WEBP image."
-        )
-
     try:
         contents = await file.read()
-
-        image = Image.open(
-            io.BytesIO(contents)
-        ).convert("RGB")
-
+        image = Image.open(io.BytesIO(contents)).convert("RGB")
     except Exception:
         raise HTTPException(
             status_code=400,
-            detail="The uploaded file is not a valid image."
+            detail="The uploaded file could not be decoded as an image. Please provide a valid JPG, PNG, or WEBP photo."
         )
 
     # 1. Detect all faces in the image

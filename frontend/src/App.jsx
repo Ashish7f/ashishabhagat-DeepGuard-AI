@@ -52,6 +52,13 @@ function App() {
 
   // Backend connection telemetry
   const [apiBaseUrl, setApiBaseUrl] = useState(() => {
+    if (typeof window !== "undefined") {
+      const hostname = window.location.hostname;
+      if (hostname === "localhost" || hostname === "127.0.0.1") {
+        return "http://localhost:10000";
+      }
+      return "/api";
+    }
     return import.meta.env.VITE_API_URL || "https://ashishabhagat-deepguard-ai.onrender.com";
   });
   const [backendStatus, setBackendStatus] = useState({
@@ -158,7 +165,7 @@ function App() {
     try {
       const response = await fetch(`${urlToTest}/`, {
         method: "GET",
-        signal: AbortSignal.timeout(6000)
+        signal: AbortSignal.timeout(20000)
       });
       const data = await response.json();
       const latency = Math.round(performance.now() - startTime);
@@ -288,7 +295,7 @@ function App() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  // Analyze image
+  // Analyze image with dual-route fallback (Proxy & Direct)
   const analyzeImage = async () => {
     if (!file) return;
 
@@ -311,45 +318,67 @@ function App() {
     const formData = new FormData();
     formData.append("file", file);
 
-    const maxRetries = 2;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        if (attempt > 1) {
-          setLoadingStep(4);
+    // Build ordered list of candidate URLs for maximum resilience
+    const targetUrls = [];
+    if (apiBaseUrl === "/api") {
+      targetUrls.push("/api/predict", "https://ashishabhagat-deepguard-ai.onrender.com/predict");
+    } else if (apiBaseUrl.includes("onrender.com")) {
+      targetUrls.push("https://ashishabhagat-deepguard-ai.onrender.com/predict", "/api/predict");
+    } else {
+      targetUrls.push(`${apiBaseUrl}/predict`);
+    }
+
+    let success = false;
+    let lastError = null;
+
+    for (let i = 0; i < targetUrls.length; i++) {
+      const targetUrl = targetUrls[i];
+      const maxRetries = targetUrl.includes("onrender.com") || targetUrl.includes("/api") ? 2 : 1;
+
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          if (attempt > 1 || i > 0) {
+            setLoadingStep(4);
+          }
+
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 60000); // 60s for Render cold-starts
+
+          const response = await fetch(targetUrl, {
+            method: "POST",
+            body: formData,
+            signal: controller.signal
+          });
+          clearTimeout(timeout);
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.detail || `Server responded with status ${response.status}`);
+          }
+
+          setResult(data);
+          setError("");
+          fetchDbStats(apiBaseUrl);
+          fetchHistory(historyFilter, apiBaseUrl);
+          success = true;
+          break;
+        } catch (err) {
+          lastError = err;
+          if (attempt < maxRetries) {
+            // Wait 3s before retry on sleeping server
+            await new Promise((r) => setTimeout(r, 3000));
+          }
         }
-
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 60000); // 60s for Render free-tier cold starts
-
-        const response = await fetch(`${apiBaseUrl}/predict`, {
-          method: "POST",
-          body: formData,
-          signal: controller.signal
-        });
-        clearTimeout(timeout);
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.detail || "Forensic analysis failed.");
-        }
-
-        setResult(data);
-        setError("");
-        fetchDbStats(apiBaseUrl);
-        fetchHistory(historyFilter, apiBaseUrl);
-        break;
-      } catch (err) {
-        if (attempt < maxRetries && apiBaseUrl.includes("onrender.com")) {
-          // Render was sleeping, wait 3 seconds and retry automatically
-          await new Promise((resolve) => setTimeout(resolve, 3000));
-          continue;
-        }
-
-        setError(
-          `Analysis connection error: ${err.message || "Could not reach backend"}. Render free-tier instances sleep when inactive and may take 30-45s to spin up. The cloud container is warming up—please click 'Retry Analysis' below.`
-        );
       }
+
+      if (success) break;
+    }
+
+    if (!success) {
+      setError(
+        `Analysis connection notice: ${lastError?.message || "Could not reach inference engine"}. Render cloud free-tier instances sleep when inactive and may take 30-45s to spin up. Please click 'Retry Analysis' below.`
+      );
     }
 
     clearTimeout(stepTimer1);
@@ -524,10 +553,10 @@ Verified via DeepGuard AI Platform`;
           <button
             type="button"
             className={`api-toggle-btn ${
-              apiBaseUrl.includes("onrender.com") ? "active" : ""
+              apiBaseUrl.includes("onrender.com") || apiBaseUrl === "/api" ? "active" : ""
             }`}
             onClick={() =>
-              setApiBaseUrl("https://ashishabhagat-deepguard-ai.onrender.com")
+              setApiBaseUrl("/api")
             }
           >
             ☁️ Cloud (Render Live)

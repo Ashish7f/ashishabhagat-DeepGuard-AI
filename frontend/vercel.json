@@ -3,6 +3,10 @@
   "framework": "vite",
   "rewrites": [
     {
+      "source": "/api/:match*",
+      "destination": "https://ashishabhagat-deepguard-ai.onrender.com/:match*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
