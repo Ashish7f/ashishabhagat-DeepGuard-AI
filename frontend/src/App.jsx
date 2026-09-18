@@ -234,8 +234,31 @@ function App() {
   };
 
   const handleImageChange = (event) => {
-    processFile(event.target.files[0]);
+    if (event.target.files && event.target.files[0]) {
+      processFile(event.target.files[0]);
+    }
+    event.target.value = "";
   };
+
+  // Clipboard Paste Support (Ctrl+V)
+  useEffect(() => {
+    const handlePaste = (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith("image/")) {
+          const pastedFile = item.getAsFile();
+          if (pastedFile) {
+            processFile(pastedFile);
+            break;
+          }
+        }
+      }
+    };
+
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, []);
 
   const handleDrop = (event) => {
     event.preventDefault();
@@ -313,6 +336,9 @@ function App() {
     setResult(null);
     setError("");
     setViewMode("normal");
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
   };
 
   // Copy result card
@@ -550,17 +576,18 @@ Verified via DeepGuard AI Platform`;
                 e.currentTarget.classList.remove("drag-over");
               }}
               onDrop={(e) => {
+                e.preventDefault();
                 e.currentTarget.classList.remove("drag-over");
                 handleDrop(e);
               }}
-              onClick={() => fileInputRef.current?.click()}
             >
               <input
                 ref={fileInputRef}
+                className="dropzone-file-input"
                 type="file"
                 accept="image/png,image/jpeg,image/jpg,image/webp"
                 onChange={handleImageChange}
-                style={{ display: "none" }}
+                aria-label="Upload face photo for deepfake inspection"
               />
 
               <div className="dropzone-reticle">
@@ -575,16 +602,13 @@ Verified via DeepGuard AI Platform`;
 
               <h3 className="dropzone-title">Drop Face Image Here or Browse</h3>
               <p className="dropzone-desc">
-                Supports JPG, PNG, and WEBP formats • Up to 15 MB
+                Supports JPG, PNG, and WEBP formats • Up to 15 MB • Paste (Ctrl+V) supported
               </p>
 
               <button
                 type="button"
                 className="btn-primary select-file-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  fileInputRef.current?.click();
-                }}
+                style={{ pointerEvents: "none" }}
               >
                 Choose Photo from Device
               </button>
