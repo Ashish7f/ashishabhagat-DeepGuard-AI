@@ -1166,6 +1166,28 @@
   line-height: 1.4;
 }
 
+.btn-retry-analysis {
+  margin-top: 10px;
+  padding: 7px 16px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 51, 102, 0.4);
+  background: rgba(255, 51, 102, 0.2);
+  color: #fff;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.btn-retry-analysis:hover {
+  background: rgba(255, 51, 102, 0.35);
+  border-color: #ff3366;
+}
+
 .error-dismiss {
   background: transparent;
   border: none;

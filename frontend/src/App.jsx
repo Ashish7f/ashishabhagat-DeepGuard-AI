@@ -292,6 +292,14 @@ function App() {
   const analyzeImage = async () => {
     if (!file) return;
 
+    // Check for Browser Mixed-Content security block
+    if (typeof window !== "undefined" && window.location.protocol === "https:" && apiBaseUrl.includes("localhost")) {
+      setError(
+        "Browser Security Policy: Web browsers block insecure 'http://localhost' requests from secure 'https://' websites (Vercel). To use your local GPU backend, open http://localhost:5173 in your browser, or select '☁️ Cloud (Render Live)'."
+      );
+      return;
+    }
+
     setLoading(true);
     setLoadingStep(1);
     setResult(null);
@@ -303,31 +311,51 @@ function App() {
     const formData = new FormData();
     formData.append("file", file);
 
-    try {
-      const response = await fetch(`${apiBaseUrl}/predict`, {
-        method: "POST",
-        body: formData
-      });
+    const maxRetries = 2;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        if (attempt > 1) {
+          setLoadingStep(4);
+        }
 
-      const data = await response.json();
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 60000); // 60s for Render free-tier cold starts
 
-      if (!response.ok) {
-        throw new Error(data.detail || "Forensic analysis failed.");
+        const response = await fetch(`${apiBaseUrl}/predict`, {
+          method: "POST",
+          body: formData,
+          signal: controller.signal
+        });
+        clearTimeout(timeout);
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.detail || "Forensic analysis failed.");
+        }
+
+        setResult(data);
+        setError("");
+        fetchDbStats(apiBaseUrl);
+        fetchHistory(historyFilter, apiBaseUrl);
+        break;
+      } catch (err) {
+        if (attempt < maxRetries && apiBaseUrl.includes("onrender.com")) {
+          // Render was sleeping, wait 3 seconds and retry automatically
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          continue;
+        }
+
+        setError(
+          `Analysis connection error: ${err.message || "Could not reach backend"}. Render free-tier instances sleep when inactive and may take 30-45s to spin up. The cloud container is warming up—please click 'Retry Analysis' below.`
+        );
       }
-
-      setResult(data);
-      fetchDbStats(apiBaseUrl);
-      fetchHistory(historyFilter, apiBaseUrl);
-    } catch (err) {
-      setError(
-        `Analysis connection error: ${err.message || "Could not reach backend"}. Render free-tier instances may take 30-45s to spin up if dormant.`
-      );
-    } finally {
-      clearTimeout(stepTimer1);
-      clearTimeout(stepTimer2);
-      setLoading(false);
-      setLoadingStep(0);
     }
+
+    clearTimeout(stepTimer1);
+    clearTimeout(stepTimer2);
+    setLoading(false);
+    setLoadingStep(0);
   };
 
   const resetAnalysis = () => {
@@ -738,6 +766,8 @@ Verified via DeepGuard AI Platform`;
                           "Executing ConvNeXt-Tiny V10.0 OmniShield 3-Pass TTA inference..."}
                         {loadingStep === 3 &&
                           "Evaluating frequency edge variance & bilateral symmetry..."}
+                        {loadingStep === 4 &&
+                          "Waking up Render cloud container (free-tier cold start, ~30s)..."}
                         {loadingStep === 0 &&
                           "DeepGuard forensic engine initializing..."}
                       </p>
@@ -1089,8 +1119,20 @@ Verified via DeepGuard AI Platform`;
             <div className="error-alert">
               <span className="error-icon">⚠️</span>
               <div className="error-content">
-                <strong>Analysis Warning</strong>
+                <strong>Analysis Notice</strong>
                 <p>{error}</p>
+                {file && (
+                  <button
+                    type="button"
+                    className="btn-retry-analysis"
+                    onClick={() => {
+                      setError("");
+                      analyzeImage();
+                    }}
+                  >
+                    🔄 Retry Analysis Now
+                  </button>
+                )}
               </div>
               <button
                 type="button"
