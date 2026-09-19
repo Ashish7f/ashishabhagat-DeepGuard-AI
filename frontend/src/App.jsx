@@ -106,6 +106,9 @@ function App() {
 
   // Backend connection telemetry
   const [apiBaseUrl, setApiBaseUrl] = useState(() => {
+    if (import.meta.env.VITE_API_URL) {
+      return import.meta.env.VITE_API_URL.replace(/\/+$/, "");
+    }
     if (typeof window !== "undefined") {
       const hostname = window.location.hostname;
       if (hostname === "localhost" || hostname === "127.0.0.1") {
@@ -113,7 +116,7 @@ function App() {
       }
       return "/api";
     }
-    return import.meta.env.VITE_API_URL || "https://ashishabhagat-deepguard-ai.onrender.com";
+    return "/api";
   });
   const [backendStatus, setBackendStatus] = useState({
     state: "checking", // "online" | "offline" | "checking"

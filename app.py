@@ -14,9 +14,11 @@ from backend.app import app
 
 if __name__ == "__main__":
     import uvicorn
-    raw_port = os.environ.get("PORT", "10000")
+    # Supports PORT from Railway / Cloud Run / Koyeb, defaulting to 7860 for Hugging Face Spaces
+    raw_port = os.environ.get("PORT", "7860")
     try:
         port = int(raw_port)
     except (ValueError, TypeError):
-        port = 10000
+        port = 7860
+    print(f"Starting DeepGuard AI server on port {port}...")
     uvicorn.run(app, host="0.0.0.0", port=port)

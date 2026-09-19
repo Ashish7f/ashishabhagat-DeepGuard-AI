@@ -1,0 +1,46 @@
+# Git
+.git
+.gitignore
+
+# Python cache & virtualenvs
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+.env.*
+
+# Datasets & evaluation manifests (Gigabytes in size)
+dataset*/
+celebdf_v2_eval/
+external_*/
+celebdf_v2_test_manifest.csv
+*.csv
+prediction_report/
+*.png
+*.jpg
+*.jpeg
+
+# Old / redundant checkpoints (keep image lightweight, v10 downloaded via download_weights.py)
+best_deepfake_detector.pth
+best_deepfake_detector_v[2-9]*.pth
+deepfake_detector.pth
+deepfake_model.pth
+
+# Training & analysis scripts
+train*.py
+eval*.py
+analyze*.py
+compare*.py
+check*.py
+normalize*.py
+crop*.py
+extract*.py
+threshold*.py
+sanity*.py
+inspect*.py
+visualize*.py
+
+# Node / Frontend
+frontend/
+node_modules/
