@@ -10,6 +10,15 @@ import AuditLog from "./components/AuditLog";
 import Benchmarks from "./components/Benchmarks";
 import FaqSection from "./components/FaqSection";
 import Footer from "./components/Footer";
+import FirebaseModal from "./components/FirebaseModal";
+
+import {
+  isFirebaseActive,
+  logScanToFirestore,
+  subscribeToFirestoreScans,
+  deleteScanFromFirestore,
+  clearAllFirestoreScans
+} from "./services/firebase";
 
 const SAMPLES = [
   {
@@ -114,6 +123,10 @@ export default function App() {
   const [viewMode, setViewMode] = useState("normal"); // "normal" | "forensic" | "thermal"
   const [copySuccess, setCopySuccess] = useState(false);
 
+  // Firebase integration state
+  const [isFirebaseModalOpen, setIsFirebaseModalOpen] = useState(false);
+  const [firebaseActive, setFirebaseActive] = useState(() => isFirebaseActive());
+
   // Backend connection telemetry
   const [apiBaseUrl, setApiBaseUrl] = useState(() => {
     if (import.meta.env.VITE_API_URL) {
@@ -136,12 +149,22 @@ export default function App() {
     device: "cpu"
   });
 
-  // Persistent Database state & scan history
-  const [dbInfo, setDbInfo] = useState({
-    status: "connected",
-    engine: "SQLITE",
-    is_sqlite: true,
-    target: "Local File (deepguard.db)"
+  // Database state & scan history
+  const [dbInfo, setDbInfo] = useState(() => {
+    if (isFirebaseActive()) {
+      return {
+        status: "connected",
+        engine: "FIREBASE",
+        is_sqlite: false,
+        target: "Google Cloud Firestore"
+      };
+    }
+    return {
+      status: "connected",
+      engine: "SQLITE",
+      is_sqlite: true,
+      target: "Local File (deepguard.db)"
+    };
   });
 
   const [dbStats, setDbStats] = useState({
@@ -172,14 +195,69 @@ export default function App() {
   const canvasRef = useRef(null);
   const cameraStreamRef = useRef(null);
 
-  // Fetch Database stats
+  // Update DB Info when Firebase status changes
+  const handleFirebaseConfigChanged = (active) => {
+    setFirebaseActive(active);
+    if (active) {
+      setDbInfo({
+        status: "connected",
+        engine: "FIREBASE",
+        is_sqlite: false,
+        target: "Google Cloud Firestore"
+      });
+    } else {
+      setDbInfo({
+        status: "connected",
+        engine: "SQLITE",
+        is_sqlite: true,
+        target: "Local File (deepguard.db)"
+      });
+      fetchDbStats(apiBaseUrl);
+      fetchHistory(historyFilter, apiBaseUrl);
+    }
+  };
+
+  // Real-time Firestore Subscription (if Firebase is active)
+  useEffect(() => {
+    if (!firebaseActive) return;
+
+    setHistoryLoading(true);
+    const unsubscribe = subscribeToFirestoreScans((firestoreRecords) => {
+      setHistory(firestoreRecords);
+      setHistoryLoading(false);
+
+      // Aggregate real-time stats from Firestore collection
+      const total = firestoreRecords.length;
+      const fakes = firestoreRecords.filter((r) => r.prediction === "FAKE").length;
+      const reals = firestoreRecords.filter((r) => r.prediction === "REAL").length;
+      const avgConf = total > 0 ? Math.round(firestoreRecords.reduce((acc, r) => acc + (Number(r.confidence) || 0), 0) / total) : 0;
+      const avgLat = total > 0 ? Math.round(firestoreRecords.reduce((acc, r) => acc + (Number(r.latency_ms) || 0), 0) / total) : 0;
+
+      setDbStats({
+        total_scans: total,
+        fake_scans: fakes,
+        real_scans: reals,
+        fake_percentage: total > 0 ? Math.round((fakes / total) * 100) : 0,
+        real_percentage: total > 0 ? Math.round((reals / total) * 100) : 0,
+        average_confidence: avgConf,
+        average_latency_ms: avgLat
+      });
+    }, 50);
+
+    return () => {
+      if (typeof unsubscribe === "function") unsubscribe();
+    };
+  }, [firebaseActive]);
+
+  // Fetch Database stats from backend (fallback when Firebase is inactive)
   const fetchDbStats = async (url = apiBaseUrl) => {
+    if (firebaseActive) return;
     try {
       const res = await fetch(`${url}/stats`);
       if (res.ok) {
         const statsData = await res.json();
         setDbStats(statsData);
-        if (statsData.database) {
+        if (statsData.database && !firebaseActive) {
           setDbInfo(statsData.database);
         }
       }
@@ -188,8 +266,9 @@ export default function App() {
     }
   };
 
-  // Fetch Database scan history
+  // Fetch Database scan history from backend (fallback when Firebase is inactive)
   const fetchHistory = async (filter = historyFilter, url = apiBaseUrl) => {
+    if (firebaseActive) return;
     setHistoryLoading(true);
     try {
       const query = filter !== "ALL" ? `?prediction=${filter}&limit=50` : "?limit=50";
@@ -205,8 +284,22 @@ export default function App() {
     }
   };
 
+  // Filtered history view for display
+  const displayedHistory = history.filter((item) => {
+    if (historyFilter === "ALL") return true;
+    return item.prediction === historyFilter;
+  });
+
   // Delete single scan record
   const handleDeleteScan = async (scanId) => {
+    if (firebaseActive) {
+      const deleted = await deleteScanFromFirestore(scanId);
+      if (deleted) {
+        setHistory((prev) => prev.filter((item) => item.id !== scanId));
+      }
+      return;
+    }
+
     try {
       const res = await fetch(`${apiBaseUrl}/history/${scanId}`, {
         method: "DELETE"
@@ -222,7 +315,15 @@ export default function App() {
 
   // Clear all database history
   const handleClearHistory = async () => {
-    if (!window.confirm("Purge all forensic scan records from the database?")) return;
+    const providerName = firebaseActive ? "Firebase Firestore" : "local SQLite";
+    if (!window.confirm(`Purge all forensic scan records from ${providerName}?`)) return;
+
+    if (firebaseActive) {
+      await clearAllFirestoreScans();
+      setHistory([]);
+      return;
+    }
+
     try {
       const res = await fetch(`${apiBaseUrl}/history`, {
         method: "DELETE"
@@ -262,11 +363,13 @@ export default function App() {
             model: data.model || "ConvNeXt-Tiny V10.0 OmniShield",
             device: data.device || "cpu"
           });
-          if (data.database) {
+          if (data.database && !firebaseActive) {
             setDbInfo(data.database);
           }
-          fetchDbStats(urlToTest);
-          fetchHistory(historyFilter, urlToTest);
+          if (!firebaseActive) {
+            fetchDbStats(urlToTest);
+            fetchHistory(historyFilter, urlToTest);
+          }
           return;
         }
       } catch {
@@ -753,8 +856,18 @@ export default function App() {
             state: "online",
             latency: data.latency_ms || prev.latency
           }));
-          fetchDbStats(apiBaseUrl);
-          fetchHistory(historyFilter, apiBaseUrl);
+
+          // If Firebase Firestore is active, log directly to Firestore
+          if (firebaseActive) {
+            logScanToFirestore({
+              ...data,
+              filename: targetFile.name || "uploaded_face.jpg"
+            });
+          } else {
+            fetchDbStats(apiBaseUrl);
+            fetchHistory(historyFilter, apiBaseUrl);
+          }
+
           success = true;
           break;
         } catch (err) {
@@ -845,6 +958,7 @@ Verified via DeepGuard AI Platform`;
         dbInfo={dbInfo}
         dbStats={dbStats}
         onPing={() => checkBackendHealth()}
+        onOpenFirebaseModal={() => setIsFirebaseModalOpen(true)}
       />
 
       {/* HERO SECTION */}
@@ -959,16 +1073,19 @@ Verified via DeepGuard AI Platform`;
       <AuditLog
         dbInfo={dbInfo}
         dbStats={dbStats}
-        history={history}
+        history={displayedHistory}
         historyFilter={historyFilter}
         setHistoryFilter={setHistoryFilter}
         historyLoading={historyLoading}
         onRefresh={() => {
-          fetchHistory(historyFilter);
-          fetchDbStats();
+          if (!firebaseActive) {
+            fetchHistory(historyFilter);
+            fetchDbStats();
+          }
         }}
         onDeleteScan={handleDeleteScan}
         onClearHistory={handleClearHistory}
+        onOpenFirebaseModal={() => setIsFirebaseModalOpen(true)}
       />
 
       {/* BENCHMARKS & ARCHITECTURE */}
@@ -979,6 +1096,13 @@ Verified via DeepGuard AI Platform`;
 
       {/* FOOTER */}
       <Footer />
+
+      {/* FIREBASE CONFIGURATION MODAL */}
+      <FirebaseModal
+        isOpen={isFirebaseModalOpen}
+        onClose={() => setIsFirebaseModalOpen(false)}
+        onConfigChanged={handleFirebaseConfigChanged}
+      />
     </div>
   );
 }

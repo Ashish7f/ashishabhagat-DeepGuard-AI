@@ -49,6 +49,15 @@ def get_db():
 
 def get_database_status():
     """Returns metadata about the active database connection."""
+    firebase_project = os.environ.get("FIREBASE_PROJECT_ID", "").strip()
+    if firebase_project:
+        return {
+            "status": "connected",
+            "engine": "FIREBASE",
+            "is_sqlite": False,
+            "target": f"Google Cloud Firestore ({firebase_project})"
+        }
+
     dialect_name = engine.dialect.name
     return {
         "status": "connected",

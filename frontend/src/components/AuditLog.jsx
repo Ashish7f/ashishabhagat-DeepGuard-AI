@@ -10,7 +10,8 @@ import {
   X,
   FileText,
   Clock,
-  ChevronRight
+  Flame,
+  Radio
 } from "lucide-react";
 
 export default function AuditLog({
@@ -22,21 +23,57 @@ export default function AuditLog({
   historyLoading,
   onRefresh,
   onDeleteScan,
-  onClearHistory
+  onClearHistory,
+  onOpenFirebaseModal
 }) {
   const [selectedScan, setSelectedScan] = useState(null);
+  const isFirebase = dbInfo.engine === "FIREBASE";
 
   return (
     <section id="audit-log" className="audit-section">
       <div className="section-container">
         {/* SECTION HEADER */}
         <div className="section-header">
-          <span className="section-kicker">PERSISTENT DATABASE • AUDIT LOG</span>
+          <span className="section-kicker">
+            {isFirebase ? "GOOGLE CLOUD FIRESTORE • AUDIT EXPLORER" : "PERSISTENT DATABASE • AUDIT LOG"}
+          </span>
           <h2 className="section-title">Forensic Audit & Telemetry Explorer</h2>
           <p className="section-subtitle">
-            Every analyzed face is permanently stored in your {dbInfo.engine} database with
-            confidence values, frequency metrics, and inference latency.
+            {isFirebase
+              ? "Every analyzed face is streamed in real-time to Google Cloud Firestore with confidence values, frequency metrics, and multi-device persistence."
+              : `Every analyzed face is stored in your ${dbInfo.engine} database (${dbInfo.target}) with confidence values and telemetry.`}
           </p>
+
+          {/* FIREBASE ENGINE CONNECTOR BANNER */}
+          <div className={`db-provider-strip ${isFirebase ? "strip-firebase" : "strip-sqlite"}`}>
+            <div className="provider-info">
+              {isFirebase ? (
+                <Flame size={16} className="text-amber flex-shrink-0" />
+              ) : (
+                <Database size={16} className="text-muted flex-shrink-0" />
+              )}
+              <span>
+                {isFirebase ? (
+                  <>Active Provider: <strong>Google Cloud Firestore</strong> (Live Stream Sync)</>
+                ) : (
+                  <>Active Provider: <strong>{dbInfo.engine} ({dbInfo.target})</strong></>
+                )}
+              </span>
+              {isFirebase && (
+                <span className="live-sync-indicator">
+                  <Radio size={12} className="text-emerald inline-icon" /> Live
+                </span>
+              )}
+            </div>
+
+            <button
+              type="button"
+              className="btn-configure-firebase"
+              onClick={onOpenFirebaseModal}
+            >
+              {isFirebase ? "Manage Firebase" : "⚡ Connect Firebase Cloud"}
+            </button>
+          </div>
         </div>
 
         {/* KPI TELEMETRY CARDS */}
@@ -44,11 +81,17 @@ export default function AuditLog({
           <div className="kpi-card">
             <div className="kpi-top">
               <span className="kpi-label">Total Audited Scans</span>
-              <Database size={16} className="kpi-icon text-muted" />
+              {isFirebase ? (
+                <Flame size={16} className="kpi-icon text-amber" />
+              ) : (
+                <Database size={16} className="kpi-icon text-muted" />
+              )}
             </div>
             <div className="kpi-value-row">
               <span className="kpi-value">{dbStats.total_scans}</span>
-              <span className="kpi-subtext">in {dbInfo.is_sqlite ? "SQLite local" : "Cloud DB"}</span>
+              <span className="kpi-subtext">
+                {isFirebase ? "in Firestore" : dbInfo.is_sqlite ? "in SQLite local" : "in Cloud DB"}
+              </span>
             </div>
           </div>
 
@@ -146,7 +189,7 @@ export default function AuditLog({
               <h4 className="empty-title">No Audit Records in Database</h4>
               <p className="empty-desc">
                 Evaluate an image in the studio above. Each inspection is automatically
-                logged to {dbInfo.target}.
+                logged to {isFirebase ? "Google Cloud Firestore" : dbInfo.target}.
               </p>
             </div>
           ) : (
@@ -168,7 +211,9 @@ export default function AuditLog({
                     key={record.id}
                     className={`audit-row ${selectedScan?.id === record.id ? "row-selected" : ""}`}
                   >
-                    <td className="cell-id">#{record.id}</td>
+                    <td className="cell-id">
+                      {String(record.id).length > 8 ? `#${String(record.id).slice(0, 7)}…` : `#${record.id}`}
+                    </td>
                     <td className="cell-file">
                       <div className="file-info-col">
                         <span className="file-title" title={record.filename}>
@@ -302,8 +347,8 @@ export default function AuditLog({
                     <strong>{selectedScan.latency_ms} ms</strong>
                   </div>
                   <div className="metric-row">
-                    <span>Model Checkpoint</span>
-                    <code>{selectedScan.model_version || "ConvNeXt-Tiny V10.0"}</code>
+                    <span>Database Target</span>
+                    <code>{isFirebase ? "Google Firestore Cloud" : dbInfo.engine}</code>
                   </div>
                 </div>
               </div>

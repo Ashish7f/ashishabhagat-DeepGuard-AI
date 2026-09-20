@@ -1,4 +1,4 @@
-import { Shield, Database, Activity, GitFork, RefreshCw, Cpu, ExternalLink } from "lucide-react";
+import { Shield, Database, Activity, RefreshCw, Flame } from "lucide-react";
 
 export default function Navbar({
   backendStatus,
@@ -6,8 +6,11 @@ export default function Navbar({
   setApiBaseUrl,
   dbInfo,
   dbStats,
-  onPing
+  onPing,
+  onOpenFirebaseModal
 }) {
+  const isFirebase = dbInfo.engine === "FIREBASE";
+
   return (
     <header className="navbar">
       <div className="nav-brand">
@@ -55,12 +58,25 @@ export default function Navbar({
           </button>
         </div>
 
-        {/* Database Telemetry */}
-        <a href="#audit-log" className="status-pill db-pill" title={`Database: ${dbInfo.target}`}>
-          <Database size={13} className="pill-icon text-muted" />
-          <span className="status-pill-text">{dbInfo.engine}</span>
-          <span className="status-count-badge">{dbStats.total_scans} logs</span>
-        </a>
+        {/* Database Telemetry / Firebase Switcher */}
+        <button
+          type="button"
+          className={`status-pill db-pill ${isFirebase ? "pill-firebase" : ""}`}
+          onClick={onOpenFirebaseModal}
+          title={isFirebase ? "Connected to Google Cloud Firestore (Click to manage)" : "Active: Local SQLite (Click to connect Firebase Firestore)"}
+        >
+          {isFirebase ? (
+            <Flame size={13} className="pill-icon text-amber" />
+          ) : (
+            <Database size={13} className="pill-icon text-muted" />
+          )}
+          <span className="status-pill-text">
+            {isFirebase ? "DB: FIREBASE" : `DB: ${dbInfo.engine}`}
+          </span>
+          <span className={`status-count-badge ${isFirebase ? "badge-firebase-live" : ""}`}>
+            {isFirebase ? "Live Sync" : `${dbStats.total_scans} logs`}
+          </span>
+        </button>
       </div>
 
       <nav className="nav-actions">
