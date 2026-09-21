@@ -1,4 +1,4 @@
-import { initializeApp, getApps, getApp } from "firebase/app";
+import { initializeApp, getApps, getApp, deleteApp } from "firebase/app";
 import {
   getFirestore,
   collection,
@@ -16,7 +16,18 @@ import {
 
 const STORAGE_KEY = "deepguard_firebase_config";
 
-// Read initial config from localStorage or Vite environment variables
+// Default Production Google Cloud Firestore configuration (Public Cloud Instance)
+export const DEFAULT_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBg0-L_NbgKS5FFy5YQyS4AJBFkHIRamEw",
+  authDomain: "deepguard-ai-202b6.firebaseapp.com",
+  projectId: "deepguard-ai-202b6",
+  storageBucket: "deepguard-ai-202b6.firebasestorage.app",
+  messagingSenderId: "491467801870",
+  appId: "1:491467801870:web:d77b7c4676abd50896835f",
+  measurementId: "G-NPBPJRCPYQ"
+};
+
+// Read initial config from localStorage, Vite environment variables, or public cloud fallback
 export function getFirebaseConfig() {
   if (typeof window !== "undefined") {
     try {
@@ -40,11 +51,13 @@ export function getFirebaseConfig() {
       projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
       storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || `${import.meta.env.VITE_FIREBASE_PROJECT_ID}.appspot.com`,
       messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
-      appId: import.meta.env.VITE_FIREBASE_APP_ID || ""
+      appId: import.meta.env.VITE_FIREBASE_APP_ID || "",
+      measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || ""
     };
   }
 
-  return null;
+  // Default universal public cloud database
+  return DEFAULT_FIREBASE_CONFIG;
 }
 
 let firebaseApp = null;
@@ -60,7 +73,16 @@ export function initFirebase(customConfig = null) {
 
   try {
     if (getApps().length > 0) {
-      firebaseApp = getApp();
+      if (customConfig) {
+        try {
+          deleteApp(getApp());
+          firebaseApp = initializeApp(config);
+        } catch {
+          firebaseApp = getApp();
+        }
+      } else {
+        firebaseApp = getApp();
+      }
     } else {
       firebaseApp = initializeApp(config);
     }
@@ -91,6 +113,13 @@ export function saveFirebaseConfig(config) {
 export function clearFirebaseConfig() {
   if (typeof window !== "undefined") {
     localStorage.removeItem(STORAGE_KEY);
+    if (getApps().length > 0) {
+      try {
+        deleteApp(getApp());
+      } catch (err) {
+        console.warn("Error deleting Firebase app:", err);
+      }
+    }
     firebaseApp = null;
     firestoreDb = null;
   }
