@@ -1,0 +1,9 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Forensic Scans Audit Log collection
+    match /forensic_scans/{scanId} {
+      allow read, write: if true;
+    }
+  }
+}
