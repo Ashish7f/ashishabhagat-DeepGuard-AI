@@ -459,7 +459,7 @@ export default function App() {
   // Client-side image payload optimizer
   async function optimizeImageForInference(inputFile) {
     if (!inputFile || typeof window === "undefined") return inputFile;
-    if (inputFile.size && inputFile.size < 350 * 1024) return inputFile;
+    if (inputFile.size && inputFile.size < 200 * 1024) return inputFile;
 
     return new Promise((resolve) => {
       try {
@@ -467,7 +467,7 @@ export default function App() {
         const objectUrl = URL.createObjectURL(inputFile);
         img.onload = () => {
           URL.revokeObjectURL(objectUrl);
-          const maxDim = 1024;
+          const maxDim = 800;
           let { width, height } = img;
           if (width > maxDim || height > maxDim) {
             if (width > height) {
@@ -495,7 +495,7 @@ export default function App() {
               }
             },
             "image/jpeg",
-            0.88
+            0.82
           );
         };
         img.onerror = () => {
@@ -772,8 +772,8 @@ export default function App() {
     setResult(null);
     setError("");
 
-    const stepTimer1 = setTimeout(() => setLoadingStep(2), 600);
-    const stepTimer2 = setTimeout(() => setLoadingStep(3), 1200);
+    const stepTimer1 = setTimeout(() => setLoadingStep(2), 250);
+    const stepTimer2 = setTimeout(() => setLoadingStep(3), 500);
 
     const fileToUpload = await optimizeImageForInference(targetFile);
     const formData = new FormData();
@@ -783,7 +783,7 @@ export default function App() {
     if (apiBaseUrl === "/api") {
       candidateRoutes.push({
         url: "/api/predict",
-        timeoutMs: 12000,
+        timeoutMs: 6000,
         name: "Edge Proxy"
       });
       candidateRoutes.push({
@@ -799,13 +799,13 @@ export default function App() {
       });
       candidateRoutes.push({
         url: "/api/predict",
-        timeoutMs: 12000,
+        timeoutMs: 6000,
         name: "Edge Proxy"
       });
     } else {
       candidateRoutes.push({
         url: `${apiBaseUrl}/predict`,
-        timeoutMs: 30000,
+        timeoutMs: 25000,
         name: "Local Backend"
       });
     }
